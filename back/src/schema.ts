@@ -23,6 +23,7 @@ export const groups = sqliteTable("groups", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   joinCode: text("join_code").notNull().unique(),
+  workspacePath: text("workspace_path"),
   professorId: text("professor_id")
     .notNull()
     .references(() => professors.id, { onDelete: "cascade" }),

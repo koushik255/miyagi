@@ -31,6 +31,7 @@ export function initDatabase() {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       join_code TEXT NOT NULL UNIQUE,
+      workspace_path TEXT,
       professor_id TEXT NOT NULL,
       created_at TEXT NOT NULL,
       FOREIGN KEY (professor_id) REFERENCES professors(id) ON DELETE CASCADE
@@ -105,6 +106,10 @@ export function initDatabase() {
   const userColumns = sqlite.query(`PRAGMA table_info(users)`).all() as { name: string }[];
   const hasPassword = userColumns.some((column) => column.name === "password");
   if (!hasPassword) sqlite.exec(`ALTER TABLE users ADD COLUMN password TEXT`);
+
+  const groupColumns = sqlite.query(`PRAGMA table_info(groups)`).all() as { name: string }[];
+  const hasWorkspacePath = groupColumns.some((column) => column.name === "workspace_path");
+  if (!hasWorkspacePath) sqlite.exec(`ALTER TABLE groups ADD COLUMN workspace_path TEXT`);
 }
 
 export function nowIso() {

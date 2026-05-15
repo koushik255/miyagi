@@ -1,20 +1,28 @@
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { relative, resolve, sep } from "node:path";
 import {
+  addDefaultParsers,
+  CodeRenderable,
   createCliRenderer,
+  getTreeSitterClient,
   InputRenderable,
   InputRenderableEvents,
   SelectRenderable,
   SelectRenderableEvents,
   TextRenderable,
+  RGBA,
+  SyntaxStyle,
 } from "@opentui/core";
 import { Group, User } from "../../src/class";
 import { professorLoginFlow } from "../shared";
 import { twoPaneLayout } from "../tui";
 
 type ProfessorGroup = ReturnType<typeof Group.listByProfessor>[number];
-type View = "home" | "groups" | "group" | "students";
+type View = "home" | "groups" | "group" | "students" | "files";
 
 export async function professorConsole() {
   const professor = await professorLoginFlow();
+  const treeSitterClient = await createWorkspaceTreeSitterClient();
   const renderer = await createCliRenderer({ exitOnCtrlC: true, clearOnShutdown: true, autoFocus: true });
   const layout = twoPaneLayout(renderer);
 
@@ -57,6 +65,18 @@ export async function professorConsole() {
     content: "",
   });
 
+  const codePreview = new CodeRenderable(renderer, {
+    position: "absolute",
+    ...layout.content,
+    content: "",
+    filetype: "text",
+    syntaxStyle: createCodeSyntaxStyle(),
+    treeSitterClient,
+    wrapMode: "none",
+    selectable: true,
+    visible: false,
+  });
+
   const inputBox = new InputRenderable(renderer, {
     position: "absolute",
     ...layout.input,
@@ -69,11 +89,27 @@ export async function professorConsole() {
   renderer.root.add(rightTitle);
   renderer.root.add(menu);
   renderer.root.add(content);
+  renderer.root.add(codePreview);
   renderer.root.add(inputBox);
+
+  function showText(text: string) {
+    codePreview.visible = false;
+    content.visible = true;
+    content.content = text;
+  }
+
+  function showCode(filePath: string, source: string) {
+    content.visible = false;
+    codePreview.visible = true;
+    codePreview.filetype = filetypeForPath(filePath);
+    codePreview.content = source;
+  }
 
   function setMenu(nextView: View) {
     view = nextView;
     inputBox.visible = false;
+    codePreview.visible = false;
+    content.visible = true;
 
     if (view === "home") {
       menu.options = [
@@ -97,6 +133,7 @@ export async function professorConsole() {
       menu.options = [
         { name: "Overview", description: "", value: "overview" },
         { name: "Add students", description: "", value: "students" },
+        { name: "Read workspace files", description: "", value: "files" },
         { name: "Back to groups", description: "", value: "back-groups" },
       ];
       content.content = selectedGroup ? groupDetailsText(selectedGroup) : "No group selected.";
@@ -105,6 +142,15 @@ export async function professorConsole() {
     if (view === "students") {
       menu.options = studentOptions();
       content.content = selectedGroup ? studentsPreviewText(selectedGroup) : "No group selected.";
+    }
+
+    if (view === "files") {
+      const files = selectedGroup ? listWorkspaceFiles(selectedGroup) : [];
+      menu.options = [
+        ...files.map((file) => ({ name: file, description: "", value: file })),
+        { name: "Back", description: "", value: "back-group" },
+      ];
+      content.content = selectedGroup ? workspaceFilesText(selectedGroup) : "No group selected.";
     }
 
     renderer.focusRenderable(menu);
@@ -164,6 +210,7 @@ export async function professorConsole() {
       if (!selectedGroup) return;
       if (option.value === "overview") content.content = groupDetailsText(selectedGroup);
       if (option.value === "students") content.content = studentsPreviewText(selectedGroup);
+      if (option.value === "files") content.content = workspaceFilesText(selectedGroup);
       if (option.value === "back-groups") content.content = "Go back to group list.";
     }
 
@@ -175,6 +222,12 @@ export async function professorConsole() {
         const added = !!Group.findMember(option.value, selectedGroup.id);
         content.content = `${student?.displayName ?? "Student"}\n\nStatus: ${added ? "added" : "not added"}\n\nPress Enter ${added ? "to leave unchanged" : "to add to this group"}.`;
       }
+    }
+
+    if (view === "files") {
+      if (!selectedGroup) return;
+      if (option.value === "back-group") showText(groupDetailsText(selectedGroup));
+      else showWorkspaceFile(selectedGroup, option.value);
     }
 
     renderer.requestRender();
@@ -202,6 +255,7 @@ export async function professorConsole() {
     if (view === "group") {
       if (option.value === "overview") content.content = selectedGroup ? groupDetailsText(selectedGroup) : "No group selected.";
       if (option.value === "students") setMenu("students");
+      if (option.value === "files") setMenu("files");
       if (option.value === "back-groups") setMenu("groups");
       renderer.requestRender();
       return;
@@ -214,7 +268,19 @@ export async function professorConsole() {
         setMenu("students");
       }
     }
+
+    if (view === "files") {
+      if (option.value === "back-group") setMenu("group");
+      else if (selectedGroup) showWorkspaceFile(selectedGroup, option.value);
+      renderer.requestRender();
+    }
   });
+
+  function showWorkspaceFile(group: ProfessorGroup, filePath: string) {
+    const result = readWorkspaceFile(group, filePath);
+    if (result.kind === "code") showCode(filePath, result.content);
+    else showText(result.content);
+  }
 
   renderer.start();
   setMenu("home");
@@ -225,7 +291,7 @@ function professorGroupsText(professorId: string) {
   if (groups.length === 0) return "Groups\n\nNo groups yet.";
 
   return `Groups\n\n${groups
-    .map((group) => `${group.name}\n  join code: ${group.joinCode}\n  students: ${Group.listMembers(group.id).length}`)
+    .map((group) => `${group.name}\n  join code: ${group.joinCode}\n  workspace: ${group.workspacePath ?? "not set"}\n  students: ${Group.listMembers(group.id).length}`)
     .join("\n\n")}`;
 }
 
@@ -233,7 +299,7 @@ function groupDetailsText(group: ProfessorGroup) {
   const members = Group.listMembers(group.id);
   const studentList = members.length ? members.map((member) => `    - ${member.displayName}`).join("\n") : "    No students yet.";
 
-  return `${group.name}\n  join code: ${group.joinCode}\n  students: ${members.length}\n\n${studentList}`;
+  return `${group.name}\n  join code: ${group.joinCode}\n  workspace: ${group.workspacePath ?? "not set"}\n  students: ${members.length}\n\n${studentList}`;
 }
 
 function studentsPreviewText(group: ProfessorGroup) {
@@ -245,4 +311,146 @@ function studentsPreviewText(group: ProfessorGroup) {
   return `Registered students\n\n${students
     .map((student) => `- ${student.displayName} ${members.includes(student.id) ? "(added)" : "(not added)"}`)
     .join("\n")}`;
+}
+
+function listWorkspaceFiles(group: ProfessorGroup): string[] {
+  if (!group.workspacePath) return [];
+
+  const root = resolve(group.workspacePath);
+
+  try {
+    const rootStat = statSync(root);
+    if (!rootStat.isDirectory()) return [];
+  } catch {
+    return [];
+  }
+
+  const files: string[] = [];
+
+  function walk(directory: string) {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.name.startsWith(".")) continue;
+
+      const fullPath = resolve(directory, entry.name);
+      if (fullPath !== root && !fullPath.startsWith(root + sep)) continue;
+
+      if (entry.isDirectory()) walk(fullPath);
+      if (entry.isFile()) files.push(relative(root, fullPath));
+    }
+  }
+
+  walk(root);
+  return files.sort();
+}
+
+function workspaceFilesText(group: ProfessorGroup) {
+  const files = listWorkspaceFiles(group);
+
+  if (!group.workspacePath) return `${group.name} workspace\n\nNo workspace path has been set for this group.`;
+  if (files.length === 0) return `${group.name} workspace\n  ${group.workspacePath}\n\nNo files found.`;
+
+  return `${group.name} workspace\n  ${group.workspacePath}\n\nSelect a file on the left and press Enter to read it.\n\nFiles:\n${files.map((file) => `  - ${file}`).join("\n")}`;
+}
+
+function readWorkspaceFile(group: ProfessorGroup, filePath: string): { kind: "code" | "text"; content: string } {
+  if (!group.workspacePath) return { kind: "text", content: "No workspace path has been set for this group." };
+
+  const root = resolve(group.workspacePath);
+  const fullPath = resolve(root, filePath);
+
+  if (fullPath !== root && !fullPath.startsWith(root + sep)) {
+    return { kind: "text", content: "Cannot read files outside the group workspace." };
+  }
+
+  try {
+    const stat = statSync(fullPath);
+    if (!stat.isFile()) return { kind: "text", content: `${filePath} is not a file.` };
+    if (stat.size > 100_000) return { kind: "text", content: `${filePath} is too large to preview in the terminal.` };
+
+    const fileText = readFileSync(fullPath, "utf8");
+    if (isCodeFile(filePath)) return { kind: "code", content: fileText };
+
+    return { kind: "text", content: `${filePath}\n${"─".repeat(Math.min(filePath.length, 60))}\n${fileText}` };
+  } catch (error) {
+    return { kind: "text", content: error instanceof Error ? error.message : `Could not read ${filePath}.` };
+  }
+}
+
+function isCodeFile(filePath: string) {
+  return filetypeForPath(filePath) !== "text";
+}
+
+function filetypeForPath(filePath: string) {
+  const extension = filePath.split(".").pop()?.toLowerCase();
+
+  const filetypes: Record<string, string> = {
+    c: "c",
+    cpp: "cpp",
+    css: "css",
+    go: "go",
+    h: "c",
+    hpp: "cpp",
+    html: "html",
+    java: "java",
+    js: "javascript",
+    jsx: "javascript",
+    json: "json",
+    md: "markdown",
+    py: "python",
+    rb: "ruby",
+    rs: "rust",
+    sh: "bash",
+    sql: "sql",
+    ts: "typescript",
+    tsx: "typescript",
+    yaml: "yaml",
+    yml: "yaml",
+    zig: "zig",
+  };
+
+  return extension ? filetypes[extension] ?? "text" : "text";
+}
+
+async function createWorkspaceTreeSitterClient() {
+  addDefaultParsers([
+    {
+      filetype: "python",
+      aliases: ["py"],
+      wasm: "https://github.com/tree-sitter/tree-sitter-python/releases/download/v0.23.6/tree-sitter-python.wasm",
+      queries: {
+        highlights: ["https://raw.githubusercontent.com/tree-sitter/tree-sitter-python/master/queries/highlights.scm"],
+      },
+    },
+  ]);
+
+  const client = getTreeSitterClient();
+  await client.initialize();
+  return client;
+}
+
+function createCodeSyntaxStyle() {
+  return SyntaxStyle.fromStyles({
+    keyword: { fg: RGBA.fromHex("#FF7B72"), bold: true },
+    "keyword.function": { fg: RGBA.fromHex("#FF7B72"), bold: true },
+    "keyword.import": { fg: RGBA.fromHex("#FF7B72"), bold: true },
+    string: { fg: RGBA.fromHex("#A5D6FF") },
+    comment: { fg: RGBA.fromHex("#8B949E"), italic: true },
+    number: { fg: RGBA.fromHex("#79C0FF") },
+    boolean: { fg: RGBA.fromHex("#79C0FF") },
+    constant: { fg: RGBA.fromHex("#79C0FF") },
+    function: { fg: RGBA.fromHex("#D2A8FF") },
+    "function.call": { fg: RGBA.fromHex("#D2A8FF") },
+    "function.builtin": { fg: RGBA.fromHex("#D2A8FF") },
+    type: { fg: RGBA.fromHex("#FFA657") },
+    variable: { fg: RGBA.fromHex("#E6EDF3") },
+    "variable.parameter": { fg: RGBA.fromHex("#FFA657") },
+    property: { fg: RGBA.fromHex("#79C0FF") },
+    operator: { fg: RGBA.fromHex("#FF7B72") },
+    punctuation: { fg: RGBA.fromHex("#F0F6FC") },
+    "markup.heading": { fg: RGBA.fromHex("#58A6FF"), bold: true },
+    "markup.bold": { fg: RGBA.fromHex("#F0F6FC"), bold: true },
+    "markup.italic": { fg: RGBA.fromHex("#F0F6FC"), italic: true },
+    "markup.raw": { fg: RGBA.fromHex("#A5D6FF") },
+    default: { fg: RGBA.fromHex("#E6EDF3") },
+  });
 }

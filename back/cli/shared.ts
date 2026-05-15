@@ -23,18 +23,31 @@ export function findProfessorWithUser(professorId: string): ActiveProfessor | un
 }
 
 export async function professorLoginFlow(): Promise<ActiveProfessor> {
+  let printedEnvLoginWarning = false;
   const envLogin = await readLoginEnv("./cli/prof.env");
   if (envLogin) {
     const professor = Professor.login(envLogin.username, envLogin.password);
-    if (!professor) throw new Error("Invalid professor credentials in prof.env");
+    const active = professor ? findProfessorWithUser(professor.id) : undefined;
 
-    await updateSession({ professorId: professor.id });
-    const active = findProfessorWithUser(professor.id);
-    if (!active) throw new Error("Could not load professor after env login");
-    return active;
+    if (active) {
+      console.clear();
+      const useEnvLogin = await confirm({
+        message: `Logging in with prof.env as ${active.displayName}. Is this you? Press Enter for yes.`,
+        default: true,
+      });
+
+      if (useEnvLogin) {
+        await updateSession({ professorId: active.id });
+        return active;
+      }
+    } else {
+      console.clear();
+      console.log("prof.env credentials did not work. Continuing with normal login.\n");
+      printedEnvLoginWarning = true;
+    }
   }
 
-  console.clear();
+  if (!printedEnvLoginWarning) console.clear();
   console.log("Miyagi Professor Login\n");
 
   const action = await select({

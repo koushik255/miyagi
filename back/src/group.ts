@@ -1,6 +1,10 @@
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
 import { db, nowIso } from "./db";
 import { groupMembers, groups, users } from "./schema";
+
+const GROUP_WORKSPACES_ROOT = process.env.GROUP_WORKSPACES_ROOT ?? "/home/koushikk/miyagi/group_workspaces";
 
 export type Group = typeof groups.$inferSelect;
 export type NewGroup = typeof groups.$inferInsert;
@@ -9,10 +13,12 @@ export type NewGroupMember = typeof groupMembers.$inferInsert;
 
 export const Group = {
   create(professorId: string, name: string): Group {
+    const workspacePath = this.createWorkspace(name);
     const group: NewGroup = {
       id: crypto.randomUUID(),
       name,
       joinCode: this.generateJoinCode(),
+      workspacePath,
       professorId,
       createdAt: nowIso(),
     };
@@ -64,6 +70,7 @@ export const Group = {
         id: groups.id,
         name: groups.name,
         joinCode: groups.joinCode,
+        workspacePath: groups.workspacePath,
         professorId: groups.professorId,
         createdAt: groups.createdAt,
         role: groupMembers.role,
@@ -87,6 +94,17 @@ export const Group = {
     db.delete(groupMembers)
       .where(and(eq(groupMembers.groupId, groupId), eq(groupMembers.userId, userId)))
       .run();
+  },
+
+  createWorkspace(name: string): string {
+    const workspacePath = join(GROUP_WORKSPACES_ROOT, this.toWorkspaceDirectoryName(name));
+    mkdirSync(workspacePath, { recursive: true });
+    return workspacePath;
+  },
+
+  toWorkspaceDirectoryName(name: string): string {
+    const cleaned = name.trim().replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^_+|_+$/g, "");
+    return cleaned || "untitled_group";
   },
 
   generateJoinCode(): string {

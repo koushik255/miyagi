@@ -1,4 +1,4 @@
-import { input, password as passwordPrompt, select } from "@inquirer/prompts";
+import { confirm, input, password as passwordPrompt, select } from "@inquirer/prompts";
 import {
   createCliRenderer,
   InputRenderable,
@@ -139,16 +139,30 @@ export async function studentConsole() {
 }
 
 async function studentLogin(): Promise<ActiveUser> {
+  let printedEnvLoginWarning = false;
   const envLogin = await readLoginEnv("./cli/student.env");
   if (envLogin) {
     const user = User.login(envLogin.username, envLogin.password);
-    if (!user) throw new Error("Invalid student credentials in student.env");
 
-    await updateSession({ studentId: user.id });
-    return { id: user.id, displayName: user.displayName };
+    if (user) {
+      console.clear();
+      const useEnvLogin = await confirm({
+        message: `Logging in with student.env as ${user.displayName}. Is this you? Press Enter for yes.`,
+        default: true,
+      });
+
+      if (useEnvLogin) {
+        await updateSession({ studentId: user.id });
+        return { id: user.id, displayName: user.displayName };
+      }
+    } else {
+      console.clear();
+      console.log("student.env credentials did not work. Continuing with normal login.\n");
+      printedEnvLoginWarning = true;
+    }
   }
 
-  console.clear();
+  if (!printedEnvLoginWarning) console.clear();
   console.log("Miyagi Student Login\n");
 
   const action = await select({
@@ -192,7 +206,7 @@ function studentGroupsText(userId: string) {
         })
         .join("\n");
 
-      return `${group.name}\n  role: ${group.role}\n  joined: ${group.joinedAt}\n  students:\n${studentList}`;
+      return `${group.name}\n  role: ${group.role}\n  workspace: ${group.workspacePath ?? "not set"}\n  joined: ${group.joinedAt}\n  students:\n${studentList}`;
     })
     .join("\n\n")}`;
 }
