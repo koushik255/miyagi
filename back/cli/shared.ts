@@ -23,7 +23,7 @@ export function findProfessorWithUser(professorId: string): ActiveProfessor | un
 }
 
 export async function professorLoginFlow(): Promise<ActiveProfessor> {
-  const envLogin = await readLoginEnv("./prof.env");
+  const envLogin = await readLoginEnv("./cli/prof.env");
   if (envLogin) {
     const professor = Professor.login(envLogin.username, envLogin.password);
     if (!professor) throw new Error("Invalid professor credentials in prof.env");

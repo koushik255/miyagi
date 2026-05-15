@@ -13,5 +13,5 @@ cli/.session.json
 Thumbs.db
 
 # env / secrets
-.env
-.env.*
+*.env
+*.env.example

@@ -78,3 +78,8 @@ Desktop.ini
 *.temp
 .tmp/
 tmp/
+
+# Backend
+*.sqlite
+*.db
+cli/.session.json

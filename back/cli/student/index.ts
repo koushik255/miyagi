@@ -139,7 +139,7 @@ export async function studentConsole() {
 }
 
 async function studentLogin(): Promise<ActiveUser> {
-  const envLogin = await readLoginEnv("./student.env");
+  const envLogin = await readLoginEnv("./cli/student.env");
   if (envLogin) {
     const user = User.login(envLogin.username, envLogin.password);
     if (!user) throw new Error("Invalid student credentials in student.env");
