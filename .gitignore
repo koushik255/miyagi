@@ -10,7 +10,8 @@ build/
 out/
 release/
 .esbuild/
-.vite/
+backend-uml.html
+vite/
 
 # Electron packaging artifacts
 *.AppImage
