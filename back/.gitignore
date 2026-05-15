@@ -5,6 +5,9 @@ node_modules/
 *.sqlite
 *.db
 
+# diagrams / generated docs
+backend-uml.html
+
 # cli session state
 cli/.session.json
 
