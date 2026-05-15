@@ -1,2 +1,17 @@
 # deps
 node_modules/
+
+# local database
+*.sqlite
+*.db
+
+# cli session state
+cli/.session.json
+
+# os junk
+.DS_Store
+Thumbs.db
+
+# env / secrets
+.env
+.env.*
