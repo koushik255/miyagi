@@ -3,13 +3,26 @@ node_modules/
 
 # local database
 *.sqlite
+*.sqlite-*
 *.db
+*.db-*
 
 # diagrams / generated docs
 backend-uml.html
 
 # cli session state
 cli/.session.json
+
+# local Miyagi workspaces / git repos
+# These are runtime data created by the backend and should not be committed.
+group_workspaces/
+group_repos/
+/group_workspaces/
+/group_repos/
+
+# OpenTUI / Tree-sitter parser caches
+.cache/
+.tree-sitter/
 
 # os junk
 .DS_Store

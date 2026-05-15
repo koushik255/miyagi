@@ -24,6 +24,8 @@ export const groups = sqliteTable("groups", {
   name: text("name").notNull(),
   joinCode: text("join_code").notNull().unique(),
   workspacePath: text("workspace_path"),
+  repoPath: text("repo_path"),
+  cloneUrl: text("clone_url"),
   professorId: text("professor_id")
     .notNull()
     .references(() => professors.id, { onDelete: "cascade" }),

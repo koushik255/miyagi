@@ -32,6 +32,8 @@ export function initDatabase() {
       name TEXT NOT NULL,
       join_code TEXT NOT NULL UNIQUE,
       workspace_path TEXT,
+      repo_path TEXT,
+      clone_url TEXT,
       professor_id TEXT NOT NULL,
       created_at TEXT NOT NULL,
       FOREIGN KEY (professor_id) REFERENCES professors(id) ON DELETE CASCADE
@@ -110,6 +112,10 @@ export function initDatabase() {
   const groupColumns = sqlite.query(`PRAGMA table_info(groups)`).all() as { name: string }[];
   const hasWorkspacePath = groupColumns.some((column) => column.name === "workspace_path");
   if (!hasWorkspacePath) sqlite.exec(`ALTER TABLE groups ADD COLUMN workspace_path TEXT`);
+  const hasRepoPath = groupColumns.some((column) => column.name === "repo_path");
+  if (!hasRepoPath) sqlite.exec(`ALTER TABLE groups ADD COLUMN repo_path TEXT`);
+  const hasCloneUrl = groupColumns.some((column) => column.name === "clone_url");
+  if (!hasCloneUrl) sqlite.exec(`ALTER TABLE groups ADD COLUMN clone_url TEXT`);
 }
 
 export function nowIso() {

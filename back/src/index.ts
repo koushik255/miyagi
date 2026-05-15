@@ -1,11 +1,14 @@
 import { Hono } from "hono";
 import { Group, initDatabase, Professor, Project, User } from "./class";
+import { handleGitHttp } from "./git-http";
 
 initDatabase();
 
 const app = new Hono();
 
 app.get("/", (c) => c.text("Backend is running"));
+
+app.all("/git/*", handleGitHttp);
 
 app.post("/users", async (c) => {
   const body = await c.req.json<{ deviceHash: string; displayName?: string }>();

@@ -82,5 +82,19 @@ tmp/
 
 # Backend
 *.sqlite
+*.sqlite-*
 *.db
+*.db-*
 cli/.session.json
+back/cli/.session.json
+
+# Miyagi runtime Git data
+# These contain nested .git repos / bare repos created by the backend.
+# They are local runtime state, not source code.
+group_workspaces/
+group_repos/
+back/group_workspaces/
+back/group_repos/
+
+# OpenTUI / Tree-sitter parser caches
+.tree-sitter/
