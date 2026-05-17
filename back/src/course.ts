@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { db, nowIso } from "./db";
-import { courseMembers, courses, users } from "./schema";
+import { courseMembers, courses, professors, users } from "./schema";
 
 export type Course = typeof courses.$inferSelect;
 export type NewCourse = typeof courses.$inferInsert;
@@ -9,6 +9,9 @@ export type NewCourseMember = typeof courseMembers.$inferInsert;
 
 export const Course = {
   create(professorId: string, name: string): Course {
+    const professor = db.select().from(professors).where(eq(professors.id, professorId)).get();
+    if (!professor) throw new Error("Professor session not found. Please sign out and sign in again.");
+
     const course: NewCourse = {
       id: crypto.randomUUID(),
       name,

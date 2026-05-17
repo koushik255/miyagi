@@ -47,9 +47,23 @@ export function initDatabase() {
       FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS assignments (
+      id TEXT PRIMARY KEY,
+      course_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      due_date TEXT,
+      professor_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE,
+      FOREIGN KEY (professor_id) REFERENCES professors(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS groups (
       id TEXT PRIMARY KEY,
       course_id TEXT,
+      assignment_id TEXT,
       name TEXT NOT NULL,
       join_code TEXT NOT NULL UNIQUE,
       workspace_path TEXT,
@@ -58,7 +72,8 @@ export function initDatabase() {
       professor_id TEXT NOT NULL,
       created_at TEXT NOT NULL,
       FOREIGN KEY (professor_id) REFERENCES professors(id) ON DELETE CASCADE,
-      FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE
+      FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE,
+      FOREIGN KEY (assignment_id) REFERENCES assignments(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS group_members (
@@ -146,6 +161,8 @@ export function initDatabase() {
   const groupColumns = sqlite.query(`PRAGMA table_info(groups)`).all() as { name: string }[];
   const hasCourseId = groupColumns.some((column) => column.name === "course_id");
   if (!hasCourseId) sqlite.exec(`ALTER TABLE groups ADD COLUMN course_id TEXT REFERENCES courses(id) ON DELETE CASCADE`);
+  const hasAssignmentId = groupColumns.some((column) => column.name === "assignment_id");
+  if (!hasAssignmentId) sqlite.exec(`ALTER TABLE groups ADD COLUMN assignment_id TEXT REFERENCES assignments(id) ON DELETE CASCADE`);
   const hasWorkspacePath = groupColumns.some((column) => column.name === "workspace_path");
   if (!hasWorkspacePath) sqlite.exec(`ALTER TABLE groups ADD COLUMN workspace_path TEXT`);
   const hasRepoPath = groupColumns.some((column) => column.name === "repo_path");

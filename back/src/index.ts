@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { eq } from "drizzle-orm";
-import { Course, Group, initDatabase, Professor, Project, User, db } from "./class";
+import { Assignment, Course, Group, initDatabase, Professor, Project, User, db } from "./class";
 import { handleGitHttp } from "./git-http";
 import { getGroupHistory } from "./history";
 import { groups } from "./schema";
@@ -13,6 +13,7 @@ Group.installWorkspaceHooksForAllGroups();
 const app = new Hono();
 
 app.use("*", cors());
+app.onError((error, c) => c.json({ error: error.message || "Request failed" }, 400));
 app.get("/", (c) => c.text("Backend is running"));
 
 app.all("/git/*", handleGitHttp);
@@ -70,7 +71,9 @@ app.post("/courses/join", async (c) => {
 app.get("/courses/professor/:professorId", (c) => c.json(Course.listByProfessor(c.req.param("professorId"))));
 app.get("/courses/user/:userId", (c) => c.json(Course.listByUser(c.req.param("userId"))));
 app.get("/courses/:courseId/members", (c) => c.json(Course.listMembers(c.req.param("courseId"))));
+app.get("/courses/:courseId/assignments", (c) => c.json(Assignment.listByCourse(c.req.param("courseId"))));
 app.get("/courses/:courseId/groups", (c) => c.json(Group.listByCourse(c.req.param("courseId"))));
+app.get("/assignments/:assignmentId/groups", (c) => c.json(Group.listByAssignment(c.req.param("assignmentId"))));
 app.get("/groups/user/:userId", (c) => c.json(Group.listByUser(c.req.param("userId"))));
 
 app.get("/groups/:groupId", (c) => {
@@ -115,9 +118,21 @@ app.get("/groups/:groupId/history", (c) => {
   }
 });
 
+app.post("/assignments", async (c) => {
+  const body = await c.req.json<{
+    professorId: string;
+    courseId: string;
+    name: string;
+    description?: string;
+    dueDate?: string;
+  }>();
+  const assignment = Assignment.create(body);
+  return c.json(assignment);
+});
+
 app.post("/groups", async (c) => {
-  const body = await c.req.json<{ professorId: string; name: string; courseId?: string }>();
-  const group = Group.create(body.professorId, body.name, body.courseId);
+  const body = await c.req.json<{ professorId: string; name: string; assignmentId: string }>();
+  const group = Group.create(body.professorId, body.name, body.assignmentId);
   return c.json(group);
 });
 

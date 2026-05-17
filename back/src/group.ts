@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
+import { Assignment } from "./assignment";
 import { Course } from "./course";
 import { db, nowIso } from "./db";
 import { groupMembers, groups, users } from "./schema";
@@ -15,24 +16,29 @@ export type GroupMember = typeof groupMembers.$inferSelect;
 export type NewGroupMember = typeof groupMembers.$inferInsert;
 
 export const Group = {
-  create(professorId: string, name: string, courseId?: string): Group {
-    const course = courseId ? Course.findById(courseId) : undefined;
-    if (courseId && !course) throw new Error("Course not found");
-    if (course && course.professorId !== professorId) throw new Error("Course does not belong to professor");
+  create(professorId: string, name: string, assignmentId: string): Group {
+    const assignment = Assignment.findById(assignmentId);
+    if (!assignment) throw new Error("Assignment not found");
+    if (assignment.professorId !== professorId) throw new Error("Assignment does not belong to professor");
+
+    const course = Course.findById(assignment.courseId);
+    if (!course) throw new Error("Course not found");
 
     const directoryName = this.toWorkspaceDirectoryName(name);
-    const courseDirectoryName = course ? this.toWorkspaceDirectoryName(course.name) : undefined;
-    const repoPath = this.createRepo(directoryName, courseDirectoryName);
-    const workspacePath = this.createWorkspace(directoryName, repoPath, courseDirectoryName);
+    const courseDirectoryName = this.toWorkspaceDirectoryName(course.name);
+    const assignmentDirectoryName = this.toWorkspaceDirectoryName(assignment.name);
+    const repoPath = this.createRepo(directoryName, courseDirectoryName, assignmentDirectoryName);
+    const workspacePath = this.createWorkspace(directoryName, repoPath, courseDirectoryName, assignmentDirectoryName);
     this.installPostReceiveHook(repoPath, workspacePath);
     const group: NewGroup = {
       id: crypto.randomUUID(),
-      courseId: course?.id ?? null,
+      courseId: course.id,
+      assignmentId: assignment.id,
       name,
       joinCode: this.generateJoinCode(),
       workspacePath,
       repoPath,
-      cloneUrl: `${GIT_HTTP_BASE_URL}/${courseDirectoryName ? `${courseDirectoryName}/` : ""}${directoryName}.git`,
+      cloneUrl: `${GIT_HTTP_BASE_URL}/${courseDirectoryName}/${assignmentDirectoryName}/${directoryName}.git`,
       professorId,
       createdAt: nowIso(),
     };
@@ -87,6 +93,10 @@ export const Group = {
     return db.select().from(groups).where(eq(groups.courseId, courseId)).all();
   },
 
+  listByAssignment(assignmentId: string): Group[] {
+    return db.select().from(groups).where(eq(groups.assignmentId, assignmentId)).all();
+  },
+
   listMembers(groupId: string) {
     return db
       .select({
@@ -108,6 +118,7 @@ export const Group = {
         id: groups.id,
         name: groups.name,
         courseId: groups.courseId,
+        assignmentId: groups.assignmentId,
         joinCode: groups.joinCode,
         workspacePath: groups.workspacePath,
         repoPath: groups.repoPath,
@@ -137,16 +148,16 @@ export const Group = {
       .run();
   },
 
-  createRepo(directoryName: string, courseDirectoryName?: string): string {
-    const repoRoot = courseDirectoryName ? join(GROUP_REPOS_ROOT, courseDirectoryName) : GROUP_REPOS_ROOT;
+  createRepo(directoryName: string, courseDirectoryName: string, assignmentDirectoryName: string): string {
+    const repoRoot = join(GROUP_REPOS_ROOT, courseDirectoryName, assignmentDirectoryName);
     mkdirSync(repoRoot, { recursive: true });
     const repoPath = join(repoRoot, `${directoryName}.git`);
     if (!existsSync(repoPath)) this.runGit(["init", "--bare", repoPath]);
     return repoPath;
   },
 
-  createWorkspace(directoryName: string, repoPath: string, courseDirectoryName?: string): string {
-    const workspaceRoot = courseDirectoryName ? join(GROUP_WORKSPACES_ROOT, courseDirectoryName) : GROUP_WORKSPACES_ROOT;
+  createWorkspace(directoryName: string, repoPath: string, courseDirectoryName: string, assignmentDirectoryName: string): string {
+    const workspaceRoot = join(GROUP_WORKSPACES_ROOT, courseDirectoryName, assignmentDirectoryName);
     mkdirSync(workspaceRoot, { recursive: true });
     const workspacePath = join(workspaceRoot, directoryName);
     if (!existsSync(workspacePath)) this.runGit(["clone", repoPath, workspacePath]);

@@ -45,9 +45,25 @@ export const courseMembers = sqliteTable(
   (table) => [uniqueIndex("course_members_user_course_unique").on(table.userId, table.courseId)],
 );
 
+export const assignments = sqliteTable("assignments", {
+  id: text("id").primaryKey(),
+  courseId: text("course_id")
+    .notNull()
+    .references(() => courses.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  dueDate: text("due_date"),
+  professorId: text("professor_id")
+    .notNull()
+    .references(() => professors.id, { onDelete: "cascade" }),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
 export const groups = sqliteTable("groups", {
   id: text("id").primaryKey(),
   courseId: text("course_id").references(() => courses.id, { onDelete: "cascade" }),
+  assignmentId: text("assignment_id").references(() => assignments.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   joinCode: text("join_code").notNull().unique(),
   workspacePath: text("workspace_path"),

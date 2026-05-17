@@ -47,10 +47,14 @@ export async function handleGitHttp(c: Context): Promise<Response> {
 
   const group = Group.findByRepoPath(repoPath);
   if (!group) return c.text("Repository not found", 404);
-  if (!canAccessGroup(user, group.id, group.professorId)) return c.text("Forbidden", 403);
+  if (!canAccessGroup(user, group.id, group.professorId))
+    return c.text("Forbidden", 403);
 
-  const isPushRequest = c.req.method === "POST" && pathInfo.endsWith("/git-receive-pack");
-  const commitsBeforePush = isPushRequest ? listAllCommitHashes(group.repoPath!) : new Set<string>();
+  const isPushRequest =
+    c.req.method === "POST" && pathInfo.endsWith("/git-receive-pack");
+  const commitsBeforePush = isPushRequest
+    ? listAllCommitHashes(group.repoPath!)
+    : new Set<string>();
 
   const backendOutput = runGitHttpBackend({
     body: await c.req.arrayBuffer(),
@@ -65,7 +69,8 @@ export async function handleGitHttp(c: Context): Promise<Response> {
     return c.text(backendOutput.stderr || "git http-backend failed", 500);
   }
 
-  if (isPushRequest) recordPushedCommits(group.id, group.repoPath!, user, commitsBeforePush);
+  if (isPushRequest)
+    recordPushedCommits(group.id, group.repoPath!, user, commitsBeforePush);
 
   const response = parseCgiResponse(backendOutput.stdout);
   return new Response(toArrayBuffer(response.body), {
@@ -74,7 +79,9 @@ export async function handleGitHttp(c: Context): Promise<Response> {
   });
 }
 
-function authenticateGitRequest(authorization: string | undefined): AuthenticatedGitUser | undefined {
+function authenticateGitRequest(
+  authorization: string | undefined,
+): AuthenticatedGitUser | undefined {
   if (!authorization?.startsWith("Basic ")) return undefined;
 
   const credentials = decodeBasicAuth(authorization);
@@ -91,7 +98,9 @@ function authenticateGitRequest(authorization: string | undefined): Authenticate
   };
 }
 
-function decodeBasicAuth(authorization: string): { username: string; password: string } | undefined {
+function decodeBasicAuth(
+  authorization: string,
+): { username: string; password: string } | undefined {
   try {
     const decoded = atob(authorization.slice("Basic ".length));
     const separator = decoded.indexOf(":");
@@ -118,23 +127,35 @@ function getRepoPath(pathInfo: string): string | undefined {
   return parts.slice(0, gitDirectoryIndex + 1).join("/");
 }
 
-function canAccessGroup(user: AuthenticatedGitUser, groupId: string, professorId: string): boolean {
+function canAccessGroup(
+  user: AuthenticatedGitUser,
+  groupId: string,
+  professorId: string,
+): boolean {
   if (user.professorId === professorId) return true;
 
   const membership = db
     .select({ id: groupMembers.id })
     .from(groupMembers)
-    .where(and(eq(groupMembers.userId, user.userId), eq(groupMembers.groupId, groupId)))
+    .where(
+      and(
+        eq(groupMembers.userId, user.userId),
+        eq(groupMembers.groupId, groupId),
+      ),
+    )
     .get();
 
   return !!membership;
 }
 
 function listAllCommitHashes(repoPath: string): Set<string> {
-  const result = Bun.spawnSync(["git", "--git-dir", repoPath, "rev-list", "--all"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  const result = Bun.spawnSync(
+    ["git", "--git-dir", repoPath, "rev-list", "--all"],
+    {
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
 
   if (!result.success) return new Set();
 
@@ -142,7 +163,12 @@ function listAllCommitHashes(repoPath: string): Set<string> {
   return new Set(output ? output.split("\n") : []);
 }
 
-function recordPushedCommits(groupId: string, repoPath: string, user: AuthenticatedGitUser, commitsBeforePush: Set<string>): void {
+function recordPushedCommits(
+  groupId: string,
+  repoPath: string,
+  user: AuthenticatedGitUser,
+  commitsBeforePush: Set<string>,
+): void {
   const commitsAfterPush = listAllCommitHashes(repoPath);
   const pushedAt = nowIso();
 
@@ -190,12 +216,17 @@ function runGitHttpBackend(input: GitBackendInput): GitBackendOutput {
 }
 
 function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  return bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
 }
 
 function parseCgiResponse(stdout: Uint8Array): CgiResponse {
   const headerBoundary = findHeaderBoundary(stdout);
-  const headerText = textDecoder.decode(stdout.slice(0, headerBoundary.headerEnd));
+  const headerText = textDecoder.decode(
+    stdout.slice(0, headerBoundary.headerEnd),
+  );
   const headers = parseCgiHeaders(headerText);
   const status = Number(headers.get("Status")?.split(" ")[0] ?? 200);
 
@@ -221,9 +252,16 @@ function parseCgiHeaders(headerText: string): Headers {
   return headers;
 }
 
-function findHeaderBoundary(bytes: Uint8Array): { headerEnd: number; bodyStart: number } {
+function findHeaderBoundary(bytes: Uint8Array): {
+  headerEnd: number;
+  bodyStart: number;
+} {
   for (let i = 0; i < bytes.length - 3; i++) {
-    const isCrlfBoundary = bytes[i] === 13 && bytes[i + 1] === 10 && bytes[i + 2] === 13 && bytes[i + 3] === 10;
+    const isCrlfBoundary =
+      bytes[i] === 13 &&
+      bytes[i + 1] === 10 &&
+      bytes[i + 2] === 13 &&
+      bytes[i + 3] === 10;
     if (isCrlfBoundary) return { headerEnd: i, bodyStart: i + 4 };
   }
 

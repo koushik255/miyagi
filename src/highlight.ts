@@ -10,7 +10,7 @@ const LANG_BY_EXT: Record<string, string> = {
   md: 'markdown', sql: 'sql',
 }
 
-const LANG_LOADERS: Record<string, () => Promise<any>> = {
+const LANG_LOADERS: Record<string, () => Promise<unknown>> = {
   typescript: () => import('shiki/langs/typescript.mjs'),
   tsx: () => import('shiki/langs/tsx.mjs'),
   javascript: () => import('shiki/langs/javascript.mjs'),
@@ -54,7 +54,8 @@ export function detectLanguage(filename: string): string {
 export async function highlight(code: string, lang: string): Promise<string> {
   const hl = await getHighlighter()
   if (lang !== 'plaintext' && !loadedLangs.has(lang) && LANG_LOADERS[lang]) {
-    await hl.loadLanguage(await LANG_LOADERS[lang]())
+    const language = await LANG_LOADERS[lang]()
+    await hl.loadLanguage(language as Parameters<HighlighterCore['loadLanguage']>[0])
     loadedLangs.add(lang)
   }
   return hl.codeToHtml(code, {

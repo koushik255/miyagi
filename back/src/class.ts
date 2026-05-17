@@ -5,6 +5,8 @@ export { Professor } from "./professor";
 export type { Professor as ProfessorRecord, NewProfessor } from "./professor";
 export { Course } from "./course";
 export type { Course as CourseRecord, CourseMember, NewCourse, NewCourseMember } from "./course";
+export { Assignment } from "./assignment";
+export type { Assignment as AssignmentRecord, NewAssignment } from "./assignment";
 export { Group } from "./group";
 export type { Group as GroupRecord, GroupMember, NewGroup, NewGroupMember } from "./group";
 export { Project, ProjectStatus } from "./project";
