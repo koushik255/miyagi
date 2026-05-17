@@ -1,9 +1,9 @@
 import { and, eq } from "drizzle-orm";
 import type { Context } from "hono";
-import { db } from "./db";
+import { db, nowIso } from "./db";
 import { GROUP_REPOS_ROOT, Group } from "./group";
 import { Professor } from "./professor";
-import { groupMembers } from "./schema";
+import { groupMembers, pushedCommits } from "./schema";
 import { User } from "./user";
 
 type AuthenticatedGitUser = {
@@ -41,13 +41,16 @@ export async function handleGitHttp(c: Context): Promise<Response> {
 
   const requestUrl = new URL(c.req.url);
   const pathInfo = getGitPathInfo(requestUrl);
-  const repoName = getRepoName(pathInfo);
+  const repoPath = getRepoPath(pathInfo);
 
-  if (!repoName) return c.text("Invalid Git repository path", 400);
+  if (!repoPath) return c.text("Invalid Git repository path", 400);
 
-  const group = Group.findByRepoName(repoName);
+  const group = Group.findByRepoPath(repoPath);
   if (!group) return c.text("Repository not found", 404);
   if (!canAccessGroup(user, group.id, group.professorId)) return c.text("Forbidden", 403);
+
+  const isPushRequest = c.req.method === "POST" && pathInfo.endsWith("/git-receive-pack");
+  const commitsBeforePush = isPushRequest ? listAllCommitHashes(group.repoPath!) : new Set<string>();
 
   const backendOutput = runGitHttpBackend({
     body: await c.req.arrayBuffer(),
@@ -61,6 +64,8 @@ export async function handleGitHttp(c: Context): Promise<Response> {
   if (!backendOutput.success) {
     return c.text(backendOutput.stderr || "git http-backend failed", 500);
   }
+
+  if (isPushRequest) recordPushedCommits(group.id, group.repoPath!, user, commitsBeforePush);
 
   const response = parseCgiResponse(backendOutput.stdout);
   return new Response(toArrayBuffer(response.body), {
@@ -105,9 +110,12 @@ function getGitPathInfo(url: URL): string {
   return decodeURIComponent(url.pathname.replace(/^\/git/, "")) || "/";
 }
 
-function getRepoName(pathInfo: string): string | undefined {
-  const repoName = pathInfo.split("/").filter(Boolean)[0];
-  return repoName?.endsWith(".git") ? repoName : undefined;
+function getRepoPath(pathInfo: string): string | undefined {
+  const parts = pathInfo.split("/").filter(Boolean);
+  const gitDirectoryIndex = parts.findIndex((part) => part.endsWith(".git"));
+  if (gitDirectoryIndex === -1) return undefined;
+
+  return parts.slice(0, gitDirectoryIndex + 1).join("/");
 }
 
 function canAccessGroup(user: AuthenticatedGitUser, groupId: string, professorId: string): boolean {
@@ -120,6 +128,39 @@ function canAccessGroup(user: AuthenticatedGitUser, groupId: string, professorId
     .get();
 
   return !!membership;
+}
+
+function listAllCommitHashes(repoPath: string): Set<string> {
+  const result = Bun.spawnSync(["git", "--git-dir", repoPath, "rev-list", "--all"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  if (!result.success) return new Set();
+
+  const output = textDecoder.decode(result.stdout).trim();
+  return new Set(output ? output.split("\n") : []);
+}
+
+function recordPushedCommits(groupId: string, repoPath: string, user: AuthenticatedGitUser, commitsBeforePush: Set<string>): void {
+  const commitsAfterPush = listAllCommitHashes(repoPath);
+  const pushedAt = nowIso();
+
+  for (const hash of commitsAfterPush) {
+    if (commitsBeforePush.has(hash)) continue;
+
+    db.insert(pushedCommits)
+      .values({
+        id: crypto.randomUUID(),
+        groupId,
+        hash,
+        pushedByUserId: user.userId,
+        pushedByUsername: user.username,
+        pushedAt,
+      })
+      .onConflictDoNothing()
+      .run();
+  }
 }
 
 function runGitHttpBackend(input: GitBackendInput): GitBackendOutput {

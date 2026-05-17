@@ -8,7 +8,7 @@ const execFileAsync = promisify(execFile)
 const isDev = process.env.VITE_DEV_SERVER_URL
 const IGNORED_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', '.next', 'target'])
 
-async function buildFileTree(rootPath, currentPath = rootPath, depth = 0) {
+async function buildFileTree(currentPath, depth = 0) {
   if (depth > 6) return []
 
   const entries = await fs.readdir(currentPath, { withFileTypes: true })
@@ -27,7 +27,7 @@ async function buildFileTree(rootPath, currentPath = rootPath, depth = 0) {
         name: entry.name,
         path: entryPath,
         type: isDirectory ? 'directory' : 'file',
-        children: isDirectory ? await buildFileTree(rootPath, entryPath, depth + 1) : undefined,
+        children: isDirectory ? await buildFileTree(entryPath, depth + 1) : undefined,
       }
     }),
   )
@@ -88,8 +88,13 @@ function createWindow() {
     minWidth: 960,
     minHeight: 640,
     title: 'Miyagi',
-    backgroundColor: '#181818',
+    backgroundColor: '#161616',
     autoHideMenuBar: true,
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    titleBarOverlay: process.platform === 'linux' || process.platform === 'win32'
+      ? { color: '#131313', symbolColor: '#a0a0a0', height: 36 }
+      : undefined,
+    frame: process.platform === 'darwin' ? true : true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,

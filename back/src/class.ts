@@ -3,6 +3,8 @@ export { User } from "./user";
 export type { User as UserRecord, NewUser } from "./user";
 export { Professor } from "./professor";
 export type { Professor as ProfessorRecord, NewProfessor } from "./professor";
+export { Course } from "./course";
+export type { Course as CourseRecord, CourseMember, NewCourse, NewCourseMember } from "./course";
 export { Group } from "./group";
 export type { Group as GroupRecord, GroupMember, NewGroup, NewGroupMember } from "./group";
 export { Project, ProjectStatus } from "./project";

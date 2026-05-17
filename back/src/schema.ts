@@ -19,8 +19,35 @@ export const professors = sqliteTable("professors", {
   createdAt: text("created_at").notNull(),
 });
 
+export const courses = sqliteTable("courses", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  joinCode: text("join_code").notNull().unique(),
+  professorId: text("professor_id")
+    .notNull()
+    .references(() => professors.id, { onDelete: "cascade" }),
+  createdAt: text("created_at").notNull(),
+});
+
+export const courseMembers = sqliteTable(
+  "course_members",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    courseId: text("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    role: text("role").notNull().default("student"),
+    joinedAt: text("joined_at").notNull(),
+  },
+  (table) => [uniqueIndex("course_members_user_course_unique").on(table.userId, table.courseId)],
+);
+
 export const groups = sqliteTable("groups", {
   id: text("id").primaryKey(),
+  courseId: text("course_id").references(() => courses.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   joinCode: text("join_code").notNull().unique(),
   workspacePath: text("workspace_path"),
@@ -92,6 +119,23 @@ export const fileNodes = sqliteTable(
     indexedAt: text("indexed_at").notNull(),
   },
   (table) => [uniqueIndex("file_nodes_project_path_unique").on(table.projectId, table.path)],
+);
+
+export const pushedCommits = sqliteTable(
+  "pushed_commits",
+  {
+    id: text("id").primaryKey(),
+    groupId: text("group_id")
+      .notNull()
+      .references(() => groups.id, { onDelete: "cascade" }),
+    hash: text("hash").notNull(),
+    pushedByUserId: text("pushed_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    pushedByUsername: text("pushed_by_username").notNull(),
+    pushedAt: text("pushed_at").notNull(),
+  },
+  (table) => [uniqueIndex("pushed_commits_group_hash_unique").on(table.groupId, table.hash)],
 );
 
 export const commitActivities = sqliteTable(

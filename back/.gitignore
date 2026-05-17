@@ -10,9 +10,6 @@ node_modules/
 # diagrams / generated docs
 backend-uml.html
 
-# cli session state
-cli/.session.json
-
 # local Miyagi workspaces / git repos
 # These are runtime data created by the backend and should not be committed.
 group_workspaces/

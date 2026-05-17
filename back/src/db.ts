@@ -27,8 +27,29 @@ export function initDatabase() {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS courses (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      join_code TEXT NOT NULL UNIQUE,
+      professor_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (professor_id) REFERENCES professors(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS course_members (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      course_id TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'student',
+      joined_at TEXT NOT NULL,
+      UNIQUE (user_id, course_id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS groups (
       id TEXT PRIMARY KEY,
+      course_id TEXT,
       name TEXT NOT NULL,
       join_code TEXT NOT NULL UNIQUE,
       workspace_path TEXT,
@@ -36,7 +57,8 @@ export function initDatabase() {
       clone_url TEXT,
       professor_id TEXT NOT NULL,
       created_at TEXT NOT NULL,
-      FOREIGN KEY (professor_id) REFERENCES professors(id) ON DELETE CASCADE
+      FOREIGN KEY (professor_id) REFERENCES professors(id) ON DELETE CASCADE,
+      FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS group_members (
@@ -90,6 +112,18 @@ export function initDatabase() {
       FOREIGN KEY (parent_id) REFERENCES file_nodes(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS pushed_commits (
+      id TEXT PRIMARY KEY,
+      group_id TEXT NOT NULL,
+      hash TEXT NOT NULL,
+      pushed_by_user_id TEXT NOT NULL,
+      pushed_by_username TEXT NOT NULL,
+      pushed_at TEXT NOT NULL,
+      UNIQUE (group_id, hash),
+      FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+      FOREIGN KEY (pushed_by_user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS commit_activities (
       id TEXT PRIMARY KEY,
       repository_id TEXT NOT NULL,
@@ -110,6 +144,8 @@ export function initDatabase() {
   if (!hasPassword) sqlite.exec(`ALTER TABLE users ADD COLUMN password TEXT`);
 
   const groupColumns = sqlite.query(`PRAGMA table_info(groups)`).all() as { name: string }[];
+  const hasCourseId = groupColumns.some((column) => column.name === "course_id");
+  if (!hasCourseId) sqlite.exec(`ALTER TABLE groups ADD COLUMN course_id TEXT REFERENCES courses(id) ON DELETE CASCADE`);
   const hasWorkspacePath = groupColumns.some((column) => column.name === "workspace_path");
   if (!hasWorkspacePath) sqlite.exec(`ALTER TABLE groups ADD COLUMN workspace_path TEXT`);
   const hasRepoPath = groupColumns.some((column) => column.name === "repo_path");

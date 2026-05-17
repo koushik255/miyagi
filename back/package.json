@@ -1,14 +1,9 @@
 {
   "name": "my-app",
   "scripts": {
-    "dev": "bun run --hot src/index.ts",
-    "cli": "bun run cli/index.ts",
-    "console": "bun run cli/interactive.ts"
+    "dev": "bun run --hot src/index.ts"
   },
   "dependencies": {
-    "@inquirer/prompts": "^8.4.3",
-    "@opentui/core": "^0.2.10",
-    "commander": "^14.0.3",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.18"
   },

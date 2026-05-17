@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { and, eq } from "drizzle-orm";
+import { Course } from "./course";
 import { db, nowIso } from "./db";
 import { groupMembers, groups, users } from "./schema";
 
@@ -14,17 +15,24 @@ export type GroupMember = typeof groupMembers.$inferSelect;
 export type NewGroupMember = typeof groupMembers.$inferInsert;
 
 export const Group = {
-  create(professorId: string, name: string): Group {
+  create(professorId: string, name: string, courseId?: string): Group {
+    const course = courseId ? Course.findById(courseId) : undefined;
+    if (courseId && !course) throw new Error("Course not found");
+    if (course && course.professorId !== professorId) throw new Error("Course does not belong to professor");
+
     const directoryName = this.toWorkspaceDirectoryName(name);
-    const repoPath = this.createRepo(directoryName);
-    const workspacePath = this.createWorkspace(directoryName, repoPath);
+    const courseDirectoryName = course ? this.toWorkspaceDirectoryName(course.name) : undefined;
+    const repoPath = this.createRepo(directoryName, courseDirectoryName);
+    const workspacePath = this.createWorkspace(directoryName, repoPath, courseDirectoryName);
+    this.installPostReceiveHook(repoPath, workspacePath);
     const group: NewGroup = {
       id: crypto.randomUUID(),
+      courseId: course?.id ?? null,
       name,
       joinCode: this.generateJoinCode(),
       workspacePath,
       repoPath,
-      cloneUrl: `${GIT_HTTP_BASE_URL}/${directoryName}.git`,
+      cloneUrl: `${GIT_HTTP_BASE_URL}/${courseDirectoryName ? `${courseDirectoryName}/` : ""}${directoryName}.git`,
       professorId,
       createdAt: nowIso(),
     };
@@ -35,6 +43,9 @@ export const Group = {
   assignStudent(joinCode: string, userId: string): GroupMember {
     const group = this.findByJoinCode(joinCode);
     if (!group) throw new Error("Group not found for join code");
+    if (group.courseId && !Course.findMember(userId, group.courseId)) {
+      throw new Error("Student must join the course before joining this group");
+    }
 
     const member: NewGroupMember = {
       id: crypto.randomUUID(),
@@ -51,13 +62,29 @@ export const Group = {
     return db.select().from(groups).where(eq(groups.joinCode, joinCode)).get();
   },
 
-  findByRepoName(repoName: string): Group | undefined {
-    const repoPath = join(GROUP_REPOS_ROOT, repoName);
+  findByRepoPath(repoRelativePath: string): Group | undefined {
+    const repoPath = join(GROUP_REPOS_ROOT, repoRelativePath);
     return db.select().from(groups).where(eq(groups.repoPath, repoPath)).get();
+  },
+
+  findByRepoName(repoName: string): Group | undefined {
+    return this.findByRepoPath(repoName);
   },
 
   listByProfessor(professorId: string): Group[] {
     return db.select().from(groups).where(eq(groups.professorId, professorId)).all();
+  },
+
+  installWorkspaceHooksForAllGroups(): void {
+    for (const group of db.select().from(groups).all()) {
+      if (!group.repoPath || !group.workspacePath) continue;
+      if (!existsSync(group.repoPath) || !existsSync(group.workspacePath)) continue;
+      this.installPostReceiveHook(group.repoPath, group.workspacePath);
+    }
+  },
+
+  listByCourse(courseId: string): Group[] {
+    return db.select().from(groups).where(eq(groups.courseId, courseId)).all();
   },
 
   listMembers(groupId: string) {
@@ -80,6 +107,7 @@ export const Group = {
       .select({
         id: groups.id,
         name: groups.name,
+        courseId: groups.courseId,
         joinCode: groups.joinCode,
         workspacePath: groups.workspacePath,
         repoPath: groups.repoPath,
@@ -109,19 +137,44 @@ export const Group = {
       .run();
   },
 
-  createRepo(directoryName: string): string {
-    mkdirSync(GROUP_REPOS_ROOT, { recursive: true });
-    const repoPath = join(GROUP_REPOS_ROOT, `${directoryName}.git`);
+  createRepo(directoryName: string, courseDirectoryName?: string): string {
+    const repoRoot = courseDirectoryName ? join(GROUP_REPOS_ROOT, courseDirectoryName) : GROUP_REPOS_ROOT;
+    mkdirSync(repoRoot, { recursive: true });
+    const repoPath = join(repoRoot, `${directoryName}.git`);
     if (!existsSync(repoPath)) this.runGit(["init", "--bare", repoPath]);
     return repoPath;
   },
 
-  createWorkspace(directoryName: string, repoPath: string): string {
-    mkdirSync(GROUP_WORKSPACES_ROOT, { recursive: true });
-    const workspacePath = join(GROUP_WORKSPACES_ROOT, directoryName);
+  createWorkspace(directoryName: string, repoPath: string, courseDirectoryName?: string): string {
+    const workspaceRoot = courseDirectoryName ? join(GROUP_WORKSPACES_ROOT, courseDirectoryName) : GROUP_WORKSPACES_ROOT;
+    mkdirSync(workspaceRoot, { recursive: true });
+    const workspacePath = join(workspaceRoot, directoryName);
     if (!existsSync(workspacePath)) this.runGit(["clone", repoPath, workspacePath]);
     else mkdirSync(workspacePath, { recursive: true });
     return workspacePath;
+  },
+
+  installPostReceiveHook(repoPath: string, workspacePath: string): void {
+    const hookPath = join(repoPath, "hooks", "post-receive");
+    const hook = `#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_PATH=${this.shellQuote(repoPath)}
+WORKSPACE_PATH=${this.shellQuote(workspacePath)}
+
+while read -r _oldrev newrev refname; do
+  case "$refname" in
+    refs/heads/*)
+      branch="\${refname#refs/heads/}"
+      git --git-dir="$REPO_PATH" --work-tree="$WORKSPACE_PATH" checkout -f "$branch"
+      git --git-dir="$REPO_PATH" --work-tree="$WORKSPACE_PATH" reset --hard "$newrev"
+      ;;
+  esac
+done
+`;
+
+    writeFileSync(hookPath, hook);
+    chmodSync(hookPath, 0o755);
   },
 
   toWorkspaceDirectoryName(name: string): string {
@@ -135,6 +188,10 @@ export const Group = {
 
     const stderr = new TextDecoder().decode(result.stderr).trim();
     throw new Error(stderr || `git ${args.join(" ")} failed`);
+  },
+
+  shellQuote(value: string): string {
+    return `'${value.replaceAll("'", "'\\''")}'`;
   },
 
   generateJoinCode(): string {
