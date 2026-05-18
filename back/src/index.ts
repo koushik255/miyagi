@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { eq } from "drizzle-orm";
 import { Assignment, Course, Group, initDatabase, Professor, Project, User, db } from "./class";
 import { handleGitHttp } from "./git-http";
+import { GIT_HTTP_BASE_URL } from "./group";
 import { getGroupHistory } from "./history";
 import { groups } from "./schema";
 import { listWorkspaceFiles, readWorkspaceFile } from "./workspace";
@@ -15,6 +16,10 @@ const app = new Hono();
 app.use("*", cors());
 app.onError((error, c) => c.json({ error: error.message || "Request failed" }, 400));
 app.get("/", (c) => c.text("Backend is running"));
+app.get("/config", (c) => c.json({
+  gitHttpBaseUrl: GIT_HTTP_BASE_URL,
+  mode: GIT_HTTP_BASE_URL.includes("localhost") || GIT_HTTP_BASE_URL.includes("127.0.0.1") ? "local" : "tunnel",
+}));
 
 app.all("/git/*", handleGitHttp);
 
@@ -79,7 +84,7 @@ app.get("/groups/user/:userId", (c) => c.json(Group.listByUser(c.req.param("user
 app.get("/groups/:groupId", (c) => {
   const group = db.select().from(groups).where(eq(groups.id, c.req.param("groupId"))).get();
   if (!group) return c.json({ error: "Group not found" }, 404);
-  return c.json(group);
+  return c.json(Group.withCurrentCloneUrl(group));
 });
 
 app.get("/groups/:groupId/members", (c) => c.json(Group.listMembers(c.req.param("groupId"))));
@@ -139,6 +144,12 @@ app.post("/groups", async (c) => {
 app.post("/groups/join", async (c) => {
   const body = await c.req.json<{ joinCode: string; userId: string }>();
   const member = Group.assignStudent(body.joinCode, body.userId);
+  return c.json(member);
+});
+
+app.post("/groups/:groupId/members", async (c) => {
+  const body = await c.req.json<{ professorId: string; userId: string }>();
+  const member = Group.assignCourseStudent(c.req.param("groupId"), body.userId, body.professorId);
   return c.json(member);
 });
 

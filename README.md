@@ -1,4 +1,59 @@
-# React + TypeScript + Vite
+# Miyagi
+
+## Development
+
+Run the backend locally:
+
+```sh
+cd back
+bun run dev
+```
+
+Run the Electron frontend locally:
+
+```sh
+npm run dev
+```
+
+By default, the frontend uses `http://localhost:3000` and new group clone URLs are generated under `http://localhost:3000/git`.
+
+Backend group repos and workspaces are stored under `/home/kous/extra` by default:
+
+- `/home/kous/extra/group_repos`
+- `/home/kous/extra/group_workspaces`
+
+## Cloudflare Tunnel Mode
+
+The Cloudflare Tunnel should point `https://miyagi.koushikkoushik.com` to the backend on `http://localhost:3000`.
+
+When you want other networks to use the backend through the tunnel, start the backend with the public Git HTTP base URL:
+
+```sh
+cd back
+bun run dev:tunnel
+```
+
+Then run the frontend pointed at the tunnel:
+
+```sh
+npm run dev:tunnel
+```
+
+For browser-only frontend development, use:
+
+```sh
+npm run dev:web:tunnel
+```
+
+The two relevant environment variables are:
+
+- `VITE_MIYAGI_API_BASE`: frontend API base URL, for example `https://miyagi.koushikkoushik.com`
+- `GIT_HTTP_BASE_URL`: backend Git clone URL base, for example `https://miyagi.koushikkoushik.com/git`
+- `MIYAGI_DATA_ROOT`: backend data root for group repos and workspaces, defaults to `/home/kous/extra`
+
+`GIT_HTTP_BASE_URL` is used when groups are created. Existing groups keep the clone URL that was stored when they were created.
+
+## Vite Template Notes
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 

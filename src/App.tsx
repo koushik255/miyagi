@@ -4,7 +4,7 @@ import {
   BookOpen, Users, ChevronRight, Plus, Search, LogOut, Copy, Check,
   FileText, GitCommit, FileCode, PanelLeftClose, PanelLeft,
   Settings, KeyRound, GraduationCap, UserRound, Inbox, AlertCircle,
-  ClipboardList, CalendarDays,
+  ClipboardList, CalendarDays, UserPlus,
 } from 'lucide-react'
 import './App.css'
 import { api, getApiBase } from './api'
@@ -375,7 +375,14 @@ function Dashboard(props: DashboardProps) {
 
       <section className="detail">
         {selectedGroup && selectedCourse && selectedAssignment ? (
-          <GroupDetail key={selectedGroup.id} course={selectedCourse} assignment={selectedAssignment} group={selectedGroup} />
+          <GroupDetail
+            key={selectedGroup.id}
+            course={selectedCourse}
+            assignment={selectedAssignment}
+            group={selectedGroup}
+            role={props.role}
+            professorId={props.role === 'professor' ? props.professor.id : undefined}
+          />
         ) : selectedAssignment && selectedCourse ? (
           <AssignmentDetail
             assignment={selectedAssignment}
@@ -765,17 +772,37 @@ function AssignmentDetail({
   )
 }
 
-/* ============ Group detail (files + history) ============ */
+/* ============ Group detail (files + history + members) ============ */
 
-function GroupDetail({ course, assignment, group }: { course: Course; assignment: Assignment; group: Group }) {
+type GroupDetailTab = 'files' | 'history' | 'students'
+
+function GroupDetail({
+  course,
+  assignment,
+  group,
+  role,
+  professorId,
+}: {
+  course: Course
+  assignment: Assignment
+  group: Group
+  role: Role
+  professorId?: string
+}) {
   const [files, setFiles] = useState<WorkspaceFile[] | null>(null)
   const [activeFile, setActiveFile] = useState<WorkspaceFile | null>(null)
   const [content, setContent] = useState<string>('')
   const [loadingContent, setLoadingContent] = useState(false)
   const [history, setHistory] = useState<HistoryEntry[] | null>(null)
   const [members, setMembers] = useState<Member[]>([])
-  const [tab, setTab] = useState<'files' | 'history'>('files')
+  const [courseMembers, setCourseMembers] = useState<Member[] | null>(null)
+  const [tab, setTab] = useState<GroupDetailTab>('files')
   const [filesCollapsed, setFilesCollapsed] = useState(false)
+  const [assigningUserId, setAssigningUserId] = useState<string | null>(null)
+
+  const refreshMembers = useCallback(() => {
+    return api<Member[]>(`/groups/${group.id}/members`).then(setMembers).catch(() => setMembers([]))
+  }, [group.id])
 
   const openFile = useCallback(async (file: WorkspaceFile) => {
     setActiveFile(file)
@@ -793,16 +820,41 @@ function GroupDetail({ course, assignment, group }: { course: Course; assignment
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setFiles(null); setHistory(null); setActiveFile(null); setContent('')
+    setFiles(null); setHistory(null); setCourseMembers(null); setActiveFile(null); setContent('')
     api<WorkspaceFile[]>(`/groups/${group.id}/files`).then((fs) => {
       setFiles(fs)
       if (fs.length > 0) openFile(fs[0])
     }).catch((e) => { showError(e); setFiles([]) })
     api<HistoryEntry[]>(`/groups/${group.id}/history`).then(setHistory).catch(() => setHistory([]))
-    api<Member[]>(`/groups/${group.id}/members`).then(setMembers).catch(() => setMembers([]))
-  }, [group.id, openFile])
+    refreshMembers()
+    if (role === 'professor') {
+      api<Member[]>(`/courses/${course.id}/members`).then(setCourseMembers).catch(() => setCourseMembers([]))
+    }
+  }, [course.id, group.id, openFile, refreshMembers, role])
 
   const lastCommit = history && history.length > 0 ? history[0] : null
+  const assignedUserIds = useMemo(() => new Set(members.map((member) => member.userId)), [members])
+  const availableStudents = useMemo(
+    () => (courseMembers ?? []).filter((member) => !assignedUserIds.has(member.userId)),
+    [assignedUserIds, courseMembers],
+  )
+
+  const assignStudent = async (student: Member) => {
+    if (!professorId) return
+    setAssigningUserId(student.userId)
+    try {
+      await api<Member>(`/groups/${group.id}/members`, {
+        method: 'POST',
+        body: JSON.stringify({ professorId, userId: student.userId }),
+      })
+      toast.success(`${student.displayName} added to ${group.name}`)
+      await refreshMembers()
+    } catch (err) {
+      showError(err, 'Could not add student')
+    } finally {
+      setAssigningUserId(null)
+    }
+  }
 
   return (
     <>
@@ -826,8 +878,13 @@ function GroupDetail({ course, assignment, group }: { course: Course; assignment
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateRows: 'auto 1fr', minHeight: 0 }}>
+      <div className="group-workspace">
         <div className="tabs">
+          {role === 'professor' && (
+            <button className={tab === 'students' ? 'active' : ''} onClick={() => setTab('students')}>
+              <UserPlus size={13} /> Add Students
+            </button>
+          )}
           <button className={tab === 'files' ? 'active' : ''} onClick={() => setTab('files')}>
             <FileText size={13} /> Files
           </button>
@@ -879,12 +936,111 @@ function GroupDetail({ course, assignment, group }: { course: Course; assignment
               </div>
               <CodePane file={activeFile} content={content} loading={loadingContent} />
             </div>
-          ) : (
+          ) : tab === 'history' ? (
             <HistoryView entries={history} />
+          ) : (
+            <AddStudentsView
+              courseMembers={courseMembers}
+              groupMembers={members}
+              availableStudents={availableStudents}
+              assigningUserId={assigningUserId}
+              onAssign={assignStudent}
+            />
           )}
         </div>
       </div>
     </>
+  )
+}
+
+function AddStudentsView({
+  courseMembers,
+  groupMembers,
+  availableStudents,
+  assigningUserId,
+  onAssign,
+}: {
+  courseMembers: Member[] | null
+  groupMembers: Member[]
+  availableStudents: Member[]
+  assigningUserId: string | null
+  onAssign: (student: Member) => void
+}) {
+  if (courseMembers === null) {
+    return (
+      <div className="students-panel">
+        <div className="skeleton-row" />
+        <div className="skeleton-row" style={{ width: '70%' }} />
+        <div className="skeleton-row" style={{ width: '85%' }} />
+      </div>
+    )
+  }
+
+  if (courseMembers.length === 0) {
+    return (
+      <div className="detail-empty">
+        <div className="icon-circle"><Users size={22} /></div>
+        <h3>No students in this course</h3>
+        <p>Students will appear here after they join the course with the course code.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="students-panel">
+      <section className="student-section">
+        <div className="student-section-header">
+          <h3>Available students</h3>
+          <span>{availableStudents.length}</span>
+        </div>
+        {availableStudents.length === 0 ? (
+          <div className="student-empty">Every course student is already in this group.</div>
+        ) : (
+          <div className="student-list">
+            {availableStudents.map((student) => (
+              <div className="student-row" key={student.userId}>
+                <div className="student-avatar">{initials(student.displayName)}</div>
+                <div className="student-main">
+                  <span className="student-name">{student.displayName}</span>
+                  <span className="student-meta">Joined course {relativeTime(student.joinedAt)}</span>
+                </div>
+                <button
+                  className="btn btn-sm btn-primary"
+                  disabled={assigningUserId === student.userId}
+                  onClick={() => onAssign(student)}
+                >
+                  <UserPlus size={12} />
+                  {assigningUserId === student.userId ? 'Adding' : 'Add'}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="student-section">
+        <div className="student-section-header">
+          <h3>Current group</h3>
+          <span>{groupMembers.length}</span>
+        </div>
+        {groupMembers.length === 0 ? (
+          <div className="student-empty">No students have been added to this group yet.</div>
+        ) : (
+          <div className="student-list compact">
+            {groupMembers.map((student) => (
+              <div className="student-row" key={student.userId}>
+                <div className="student-avatar">{initials(student.displayName)}</div>
+                <div className="student-main">
+                  <span className="student-name">{student.displayName}</span>
+                  <span className="student-meta">Added {relativeTime(student.joinedAt)}</span>
+                </div>
+                <span className="student-status">Assigned</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
   )
 }
 

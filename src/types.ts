@@ -6,7 +6,7 @@ export type Assignment = { id: string; courseId: string; name: string; descripti
 export type Group = { id: string; name: string; courseId: string | null; assignmentId: string | null; joinCode: string; workspacePath?: string | null; cloneUrl?: string | null }
 export type WorkspaceFile = { path: string; name: string }
 export type HistoryEntry = { hash: string; author: string; pushedBy?: string | null; when: string; message: string }
-export type Member = { id: string; displayName: string }
+export type Member = { memberId: string; userId: string; displayName: string; role: string; joinedAt: string }
 
 export type Session =
   | { role: 'student'; user: User }

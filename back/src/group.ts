@@ -1,14 +1,15 @@
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 import { and, eq } from "drizzle-orm";
 import { Assignment } from "./assignment";
 import { Course } from "./course";
 import { db, nowIso } from "./db";
 import { groupMembers, groups, users } from "./schema";
 
-const GROUP_WORKSPACES_ROOT = process.env.GROUP_WORKSPACES_ROOT ?? "/home/koushikk/miyagi/group_workspaces";
-export const GROUP_REPOS_ROOT = process.env.GROUP_REPOS_ROOT ?? "/home/koushikk/miyagi/group_repos";
-const GIT_HTTP_BASE_URL = (process.env.GIT_HTTP_BASE_URL ?? "http://localhost:3000/git").replace(/\/$/, "");
+const MIYAGI_DATA_ROOT = process.env.MIYAGI_DATA_ROOT ?? "/home/kous/extra";
+const GROUP_WORKSPACES_ROOT = process.env.GROUP_WORKSPACES_ROOT ?? join(MIYAGI_DATA_ROOT, "group_workspaces");
+export const GROUP_REPOS_ROOT = process.env.GROUP_REPOS_ROOT ?? join(MIYAGI_DATA_ROOT, "group_repos");
+export const GIT_HTTP_BASE_URL = (process.env.GIT_HTTP_BASE_URL ?? "http://localhost:3000/git").replace(/\/$/, "");
 
 export type Group = typeof groups.$inferSelect;
 export type NewGroup = typeof groups.$inferInsert;
@@ -64,6 +65,26 @@ export const Group = {
     return db.insert(groupMembers).values(member).onConflictDoNothing().returning().get() ?? this.findMember(userId, group.id)!;
   },
 
+  assignCourseStudent(groupId: string, userId: string, professorId: string): GroupMember {
+    const group = db.select().from(groups).where(eq(groups.id, groupId)).get();
+    if (!group) throw new Error("Group not found");
+    if (group.professorId !== professorId) throw new Error("Group does not belong to professor");
+    if (!group.courseId) throw new Error("Group is not attached to a course");
+    if (!Course.findMember(userId, group.courseId)) {
+      throw new Error("Student must join the course before joining this group");
+    }
+
+    const member: NewGroupMember = {
+      id: crypto.randomUUID(),
+      userId,
+      groupId: group.id,
+      role: "student",
+      joinedAt: nowIso(),
+    };
+
+    return db.insert(groupMembers).values(member).onConflictDoNothing().returning().get() ?? this.findMember(userId, group.id)!;
+  },
+
   findByJoinCode(joinCode: string): Group | undefined {
     return db.select().from(groups).where(eq(groups.joinCode, joinCode)).get();
   },
@@ -78,7 +99,7 @@ export const Group = {
   },
 
   listByProfessor(professorId: string): Group[] {
-    return db.select().from(groups).where(eq(groups.professorId, professorId)).all();
+    return db.select().from(groups).where(eq(groups.professorId, professorId)).all().map((group) => this.withCurrentCloneUrl(group));
   },
 
   installWorkspaceHooksForAllGroups(): void {
@@ -90,11 +111,11 @@ export const Group = {
   },
 
   listByCourse(courseId: string): Group[] {
-    return db.select().from(groups).where(eq(groups.courseId, courseId)).all();
+    return db.select().from(groups).where(eq(groups.courseId, courseId)).all().map((group) => this.withCurrentCloneUrl(group));
   },
 
   listByAssignment(assignmentId: string): Group[] {
-    return db.select().from(groups).where(eq(groups.assignmentId, assignmentId)).all();
+    return db.select().from(groups).where(eq(groups.assignmentId, assignmentId)).all().map((group) => this.withCurrentCloneUrl(group));
   },
 
   listMembers(groupId: string) {
@@ -110,6 +131,30 @@ export const Group = {
       .innerJoin(users, eq(groupMembers.userId, users.id))
       .where(eq(groupMembers.groupId, groupId))
       .all();
+  },
+
+  withCurrentCloneUrl<T extends Group>(group: T): T {
+    if (!group.repoPath) return this.withRebasedStoredCloneUrl(group);
+
+    const repoRelativePath = relative(GROUP_REPOS_ROOT, group.repoPath);
+    if (!repoRelativePath || repoRelativePath.startsWith("..")) return this.withRebasedStoredCloneUrl(group);
+
+    return {
+      ...group,
+      cloneUrl: `${GIT_HTTP_BASE_URL}/${repoRelativePath.split(sep).join("/")}`,
+    };
+  },
+
+  withRebasedStoredCloneUrl<T extends Group>(group: T): T {
+    if (!group.cloneUrl) return group;
+
+    const localGitBase = /^https?:\/\/(?:localhost|127\.0\.0\.1):\d+\/git/;
+    if (!localGitBase.test(group.cloneUrl)) return group;
+
+    return {
+      ...group,
+      cloneUrl: group.cloneUrl.replace(localGitBase, GIT_HTTP_BASE_URL),
+    };
   },
 
   listByUser(userId: string) {
@@ -131,7 +176,8 @@ export const Group = {
       .from(groupMembers)
       .innerJoin(groups, eq(groupMembers.groupId, groups.id))
       .where(eq(groupMembers.userId, userId))
-      .all();
+      .all()
+      .map((group) => this.withCurrentCloneUrl(group));
   },
 
   findMember(userId: string, groupId: string): GroupMember | undefined {
