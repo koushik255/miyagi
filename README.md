@@ -36,7 +36,7 @@ bun run dev:tunnel
 Then run the frontend pointed at the tunnel:
 
 ```sh
-npm run dev:tunnel
+npm run dev:out
 ```
 
 For browser-only frontend development, use:
