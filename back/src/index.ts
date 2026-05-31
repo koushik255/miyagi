@@ -2,9 +2,12 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { eq } from "drizzle-orm";
 import { Assignment, Course, Group, initDatabase, Professor, Project, User, db } from "./class";
+import { importAssignmentGroups, importCourseStudents } from "./csv-import";
+import { getAssignmentDashboard, getGroupDashboard } from "./dashboard";
 import { handleGitHttp } from "./git-http";
+import { getGroupGithubActivity } from "./github";
 import { GIT_HTTP_BASE_URL } from "./group";
-import { getGroupHistory } from "./history";
+import { getGroupDiff, getGroupHistory } from "./history";
 import { groups } from "./schema";
 import { listWorkspaceFiles, readWorkspaceFile } from "./workspace";
 
@@ -76,9 +79,23 @@ app.post("/courses/join", async (c) => {
 app.get("/courses/professor/:professorId", (c) => c.json(Course.listByProfessor(c.req.param("professorId"))));
 app.get("/courses/user/:userId", (c) => c.json(Course.listByUser(c.req.param("userId"))));
 app.get("/courses/:courseId/members", (c) => c.json(Course.listMembers(c.req.param("courseId"))));
+
+app.post("/courses/:courseId/import-students", async (c) => {
+  const body = await c.req.json<{ professorId: string; csv: string }>();
+  return c.json(importCourseStudents({ professorId: body.professorId, courseId: c.req.param("courseId"), csv: body.csv }));
+});
 app.get("/courses/:courseId/assignments", (c) => c.json(Assignment.listByCourse(c.req.param("courseId"))));
 app.get("/courses/:courseId/groups", (c) => c.json(Group.listByCourse(c.req.param("courseId"))));
 app.get("/assignments/:assignmentId/groups", (c) => c.json(Group.listByAssignment(c.req.param("assignmentId"))));
+app.get("/assignments/:assignmentId/dashboard", async (c) => {
+  const period = (c.req.query("period") as "weekly" | "monthly" | "semester") || "semester";
+  return c.json(await getAssignmentDashboard(c.req.param("assignmentId"), period));
+});
+
+app.post("/assignments/:assignmentId/import-groups", async (c) => {
+  const body = await c.req.json<{ professorId: string; csv: string }>();
+  return c.json(importAssignmentGroups({ professorId: body.professorId, assignmentId: c.req.param("assignmentId"), csv: body.csv }));
+});
 app.get("/groups/user/:userId", (c) => c.json(Group.listByUser(c.req.param("userId"))));
 
 app.get("/groups/:groupId", (c) => {
@@ -88,6 +105,20 @@ app.get("/groups/:groupId", (c) => {
 });
 
 app.get("/groups/:groupId/members", (c) => c.json(Group.listMembers(c.req.param("groupId"))));
+
+app.patch("/groups/:groupId/github", async (c) => {
+  const body = await c.req.json<{ professorId: string; githubRepoUrl: string }>();
+  const group = db.select().from(groups).where(eq(groups.id, c.req.param("groupId"))).get();
+  if (!group) return c.json({ error: "Group not found" }, 404);
+  if (group.professorId !== body.professorId) return c.json({ error: "Group does not belong to professor" }, 403);
+  const updated = Group.updateGithubRepository(group.id, body.githubRepoUrl);
+  return c.json(updated);
+});
+
+app.get("/groups/:groupId/dashboard", async (c) => {
+  const period = (c.req.query("period") as "weekly" | "monthly" | "semester") || "semester";
+  return c.json(await getGroupDashboard(c.req.param("groupId"), period));
+});
 
 app.get("/groups/:groupId/files", (c) => {
   const group = db.select().from(groups).where(eq(groups.id, c.req.param("groupId"))).get();
@@ -111,6 +142,8 @@ app.get("/groups/:groupId/files/content", (c) => {
   }
 });
 
+app.get("/groups/:groupId/github/activity", async (c) => c.json(await getGroupGithubActivity(c.req.param("groupId"))));
+
 app.get("/groups/:groupId/history", (c) => {
   const group = db.select().from(groups).where(eq(groups.id, c.req.param("groupId"))).get();
   if (!group) return c.json({ error: "Group not found" }, 404);
@@ -123,6 +156,22 @@ app.get("/groups/:groupId/history", (c) => {
   }
 });
 
+app.get("/groups/:groupId/diff", (c) => {
+  const group = db.select().from(groups).where(eq(groups.id, c.req.param("groupId"))).get();
+  if (!group) return c.json({ error: "Group not found" }, 404);
+  if (!group.repoPath) return c.json({ error: "No repository path" }, 404);
+
+  try {
+    return c.json(getGroupDiff(group, {
+      base: c.req.query("base"),
+      commit: c.req.query("commit"),
+      head: c.req.query("head"),
+    }));
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Could not read diff" }, 400);
+  }
+});
+
 app.post("/assignments", async (c) => {
   const body = await c.req.json<{
     professorId: string;
@@ -130,6 +179,7 @@ app.post("/assignments", async (c) => {
     name: string;
     description?: string;
     dueDate?: string;
+    repositoryMode?: "local" | "github";
   }>();
   const assignment = Assignment.create(body);
   return c.json(assignment);

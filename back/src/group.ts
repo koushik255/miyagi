@@ -25,6 +25,26 @@ export const Group = {
     const course = Course.findById(assignment.courseId);
     if (!course) throw new Error("Course not found");
 
+    if (assignment.repositoryMode === "github") {
+      const group: NewGroup = {
+        id: crypto.randomUUID(),
+        courseId: course.id,
+        assignmentId: assignment.id,
+        name,
+        joinCode: this.generateJoinCode(),
+        workspacePath: null,
+        repoPath: null,
+        cloneUrl: null,
+        repositoryProvider: "github",
+        githubRepoUrl: null,
+        githubOwner: null,
+        githubRepo: null,
+        professorId,
+        createdAt: nowIso(),
+      };
+      return db.insert(groups).values(group).returning().get();
+    }
+
     const directoryName = this.toWorkspaceDirectoryName(name);
     const courseDirectoryName = this.toWorkspaceDirectoryName(course.name);
     const assignmentDirectoryName = this.toWorkspaceDirectoryName(assignment.name);
@@ -65,7 +85,7 @@ export const Group = {
     return db.insert(groupMembers).values(member).onConflictDoNothing().returning().get() ?? this.findMember(userId, group.id)!;
   },
 
-  assignCourseStudent(groupId: string, userId: string, professorId: string): GroupMember {
+  assignCourseStudent(groupId: string, userId: string, professorId: string, githubUsername?: string): GroupMember {
     const group = db.select().from(groups).where(eq(groups.id, groupId)).get();
     if (!group) throw new Error("Group not found");
     if (group.professorId !== professorId) throw new Error("Group does not belong to professor");
@@ -79,10 +99,75 @@ export const Group = {
       userId,
       groupId: group.id,
       role: "student",
+      githubUsername: githubUsername ?? null,
       joinedAt: nowIso(),
     };
 
-    return db.insert(groupMembers).values(member).onConflictDoNothing().returning().get() ?? this.findMember(userId, group.id)!;
+    const inserted = db.insert(groupMembers).values(member).onConflictDoNothing().returning().get();
+    if (inserted) return inserted;
+    if (githubUsername) {
+      return db
+        .update(groupMembers)
+        .set({ githubUsername })
+        .where(and(eq(groupMembers.userId, userId), eq(groupMembers.groupId, group.id)))
+        .returning()
+        .get();
+    }
+    return this.findMember(userId, group.id)!;
+  },
+
+  findOrCreateForAssignment(input: { professorId: string; assignmentId: string; name: string; githubRepoUrl?: string }): Group {
+    const assignment = Assignment.findById(input.assignmentId);
+    if (!assignment) throw new Error("Assignment not found");
+    if (assignment.professorId !== input.professorId) throw new Error("Assignment does not belong to professor");
+
+    const existing = db
+      .select()
+      .from(groups)
+      .where(and(eq(groups.assignmentId, input.assignmentId), eq(groups.name, input.name)))
+      .get();
+    if (existing) return this.updateGithubRepository(existing.id, input.githubRepoUrl) ?? this.withCurrentCloneUrl(existing);
+
+    if (assignment.repositoryMode === "github") {
+      const parsed = this.parseGithubUrl(input.githubRepoUrl);
+      const group: NewGroup = {
+        id: crypto.randomUUID(),
+        courseId: assignment.courseId,
+        assignmentId: assignment.id,
+        name: input.name,
+        joinCode: this.generateJoinCode(),
+        workspacePath: null,
+        repoPath: null,
+        cloneUrl: input.githubRepoUrl ?? null,
+        repositoryProvider: "github",
+        githubRepoUrl: input.githubRepoUrl ?? null,
+        githubOwner: parsed?.owner ?? null,
+        githubRepo: parsed?.repo ?? null,
+        professorId: input.professorId,
+        createdAt: nowIso(),
+      };
+      return db.insert(groups).values(group).returning().get();
+    }
+
+    return this.create(input.professorId, input.name, input.assignmentId);
+  },
+
+  updateGithubRepository(groupId: string, githubRepoUrl?: string): Group | undefined {
+    if (!githubRepoUrl) return undefined;
+    const parsed = this.parseGithubUrl(githubRepoUrl);
+    return db
+      .update(groups)
+      .set({ repositoryProvider: "github", githubRepoUrl, githubOwner: parsed?.owner ?? null, githubRepo: parsed?.repo ?? null, cloneUrl: githubRepoUrl })
+      .where(eq(groups.id, groupId))
+      .returning()
+      .get();
+  },
+
+  parseGithubUrl(url?: string): { owner: string; repo: string } | undefined {
+    if (!url) return undefined;
+    const match = url.match(/github\.com[:/]([^/]+)\/([^/.#?]+)(?:\.git)?/i);
+    if (!match) throw new Error(`Invalid GitHub URL: ${url}`);
+    return { owner: match[1], repo: match[2] };
   },
 
   findByJoinCode(joinCode: string): Group | undefined {
@@ -125,6 +210,7 @@ export const Group = {
         userId: users.id,
         displayName: users.displayName,
         role: groupMembers.role,
+        githubUsername: groupMembers.githubUsername,
         joinedAt: groupMembers.joinedAt,
       })
       .from(groupMembers)
@@ -168,6 +254,10 @@ export const Group = {
         workspacePath: groups.workspacePath,
         repoPath: groups.repoPath,
         cloneUrl: groups.cloneUrl,
+        repositoryProvider: groups.repositoryProvider,
+        githubRepoUrl: groups.githubRepoUrl,
+        githubOwner: groups.githubOwner,
+        githubRepo: groups.githubRepo,
         professorId: groups.professorId,
         createdAt: groups.createdAt,
         role: groupMembers.role,

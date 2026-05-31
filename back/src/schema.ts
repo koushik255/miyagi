@@ -1,10 +1,12 @@
 import { relations } from "drizzle-orm";
-import { sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   deviceHash: text("device_hash").notNull().unique(),
   displayName: text("display_name").notNull(),
+  email: text("email").unique(),
+  studentId: text("student_id").unique(),
   password: text("password"),
   createdAt: text("created_at").notNull(),
   lastSeenAt: text("last_seen_at").notNull(),
@@ -56,6 +58,7 @@ export const assignments = sqliteTable("assignments", {
   professorId: text("professor_id")
     .notNull()
     .references(() => professors.id, { onDelete: "cascade" }),
+  repositoryMode: text("repository_mode").notNull().default("local"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
@@ -69,6 +72,10 @@ export const groups = sqliteTable("groups", {
   workspacePath: text("workspace_path"),
   repoPath: text("repo_path"),
   cloneUrl: text("clone_url"),
+  repositoryProvider: text("repository_provider").notNull().default("local"),
+  githubRepoUrl: text("github_repo_url"),
+  githubOwner: text("github_owner"),
+  githubRepo: text("github_repo"),
   professorId: text("professor_id")
     .notNull()
     .references(() => professors.id, { onDelete: "cascade" }),
@@ -86,6 +93,7 @@ export const groupMembers = sqliteTable(
       .notNull()
       .references(() => groups.id, { onDelete: "cascade" }),
     role: text("role").notNull().default("student"),
+    githubUsername: text("github_username"),
     joinedAt: text("joined_at").notNull(),
   },
   (table) => [uniqueIndex("group_members_user_group_unique").on(table.userId, table.groupId)],
@@ -166,8 +174,13 @@ export const commitActivities = sqliteTable(
       .references(() => projects.id, { onDelete: "cascade" }),
     hash: text("hash").notNull(),
     authorName: text("author_name").notNull(),
+    githubUsername: text("github_username"),
     message: text("message").notNull(),
     branch: text("branch").notNull(),
+    additions: integer("additions").notNull().default(0),
+    deletions: integer("deletions").notNull().default(0),
+    changedFiles: integer("changed_files").notNull().default(0),
+    htmlUrl: text("html_url"),
     committedAt: text("committed_at").notNull(),
   },
   (table) => [uniqueIndex("commit_activities_repo_hash_unique").on(table.repositoryId, table.hash)],

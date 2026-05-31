@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Toaster, toast } from 'sonner'
 import {
   BookOpen, Users, ChevronRight, Plus, Search, LogOut, Copy, Check,
-  FileText, GitCommit, FileCode, PanelLeftClose, PanelLeft,
+  PanelLeftClose, PanelLeft,
   Settings, KeyRound, GraduationCap, UserRound, Inbox, AlertCircle,
-  ClipboardList, CalendarDays, UserPlus,
+  ClipboardList, CalendarDays,
 } from 'lucide-react'
 import './App.css'
 import { api, getApiBase } from './api'
-import { initials, relativeTime } from './format'
-import { detectLanguage, highlight } from './highlight'
-import type { Assignment, Course, Group, HistoryEntry, Member, Professor, Role, Session, User, WorkspaceFile } from './types'
+import { initials } from './format'
+import type { Assignment, Course, Group, Professor, Role, Session, User } from './types'
+import { GroupDetail } from './components/groups/GroupDetail'
 
 function showError(err: unknown, fallback = 'Something went wrong') {
   toast.error(err instanceof Error ? err.message : fallback)
@@ -165,6 +165,7 @@ function Dashboard(props: DashboardProps) {
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null)
   const [search, setSearch] = useState('')
   const [collapsed, setCollapsed] = useState(false)
+  const [sidebarContent, setSidebarContent] = useState<ReactNode | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
   const refreshCourses = useCallback(async () => {
@@ -290,70 +291,77 @@ function Dashboard(props: DashboardProps) {
   const selectedCourse = courses?.find((c) => c.id === selectedCourseId) ?? null
 
   const userDisplayName = props.role === 'professor' ? props.displayName : props.user.displayName
+  const sidebarTitle = sidebarContent ? 'Commits' : props.role === 'professor' ? 'My Courses' : 'Enrolled Courses'
 
   return (
     <div className={`dashboard ${collapsed ? 'collapsed' : ''}`}>
       {!collapsed && (
         <aside className="sidebar">
           <div className="sidebar-header">
-            <span className="sidebar-title">{props.role === 'professor' ? 'My Courses' : 'Enrolled Courses'}</span>
+            <span className="sidebar-title">{sidebarTitle}</span>
             <button className="btn-icon" title="Collapse sidebar" onClick={() => setCollapsed(true)}>
               <PanelLeftClose size={14} />
             </button>
           </div>
-          <div className="sidebar-search">
-            <Search size={13} className="search-icon" />
-            <input
-              ref={searchRef}
-              placeholder="Search courses, assignments, groups…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            <span className="kbd-hint">⌘K</span>
-          </div>
+          {!sidebarContent && (
+            <div className="sidebar-search">
+              <Search size={13} className="search-icon" />
+              <input
+                ref={searchRef}
+                placeholder="Search courses, assignments, groups…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              <span className="kbd-hint">⌘K</span>
+            </div>
+          )}
           <div className="sidebar-body">
-            {props.role === 'student' && (
-              <JoinCourseForm onJoined={refreshCourses} userId={props.user.id} />
-            )}
-            {props.role === 'professor' && (
-              <CreateCourseForm onCreated={refreshCourses} professorId={props.professor.id} />
-            )}
-
-            {courses === null ? (
+            {sidebarContent ?? (
               <>
-                <div className="skeleton-row" />
-                <div className="skeleton-row" style={{ width: '70%' }} />
-                <div className="skeleton-row" style={{ width: '85%' }} />
+                {props.role === 'student' && (
+                  <JoinCourseForm onJoined={refreshCourses} userId={props.user.id} />
+                )}
+                {props.role === 'professor' && (
+                  <CreateCourseForm onCreated={refreshCourses} professorId={props.professor.id} />
+                )}
+
+                {courses === null ? (
+                  <>
+                    <div className="skeleton-row" />
+                    <div className="skeleton-row" style={{ width: '70%' }} />
+                    <div className="skeleton-row" style={{ width: '85%' }} />
+                  </>
+                ) : filteredCourses && filteredCourses.length === 0 ? (
+                  <div className="sidebar-empty">
+                    {search ? 'No matches.' : props.role === 'professor'
+                      ? 'No courses yet. Create one above.'
+                      : 'No courses yet. Use a join code above.'}
+                  </div>
+                ) : (
+                  filteredCourses?.map((course) => (
+                    <CourseNode
+                      key={course.id}
+                      role={props.role}
+                      course={course}
+                      assignments={assignmentsByCourse[course.id]}
+                      groupsByAssignment={groupsByAssignment}
+                      expanded={expandedCourses.has(course.id)}
+                      expandedAssignments={expandedAssignments}
+                      active={selectedCourseId === course.id && !selectedAssignment && !selectedGroup}
+                      activeAssignmentId={selectedAssignment?.id ?? null}
+                      activeGroupId={selectedGroup?.id ?? null}
+                      onToggle={() => toggleCourse(course.id)}
+                      onToggleAssignment={toggleAssignment}
+                      onSelectCourse={() => selectCourse(course)}
+                      onSelectAssignment={(assignment) => selectAssignment(course, assignment)}
+                      onSelectGroup={(assignment, group) => selectGroup(course, assignment, group)}
+                      onAssignmentCreated={() => loadAssignments(course)}
+                      onGroupCreated={(assignment) => loadGroups(assignment)}
+                      professorId={props.role === 'professor' ? props.professor.id : undefined}
+                    />
+                  ))
+                )}
               </>
-            ) : filteredCourses && filteredCourses.length === 0 ? (
-              <div className="sidebar-empty">
-                {search ? 'No matches.' : props.role === 'professor'
-                  ? 'No courses yet. Create one above.'
-                  : 'No courses yet. Use a join code above.'}
-              </div>
-            ) : (
-              filteredCourses?.map((course) => (
-                <CourseNode
-                  key={course.id}
-                  role={props.role}
-                  course={course}
-                  assignments={assignmentsByCourse[course.id]}
-                  groupsByAssignment={groupsByAssignment}
-                  expanded={expandedCourses.has(course.id)}
-                  expandedAssignments={expandedAssignments}
-                  active={selectedCourseId === course.id && !selectedAssignment && !selectedGroup}
-                  activeAssignmentId={selectedAssignment?.id ?? null}
-                  activeGroupId={selectedGroup?.id ?? null}
-                  onToggle={() => toggleCourse(course.id)}
-                  onToggleAssignment={toggleAssignment}
-                  onSelectCourse={() => selectCourse(course)}
-                  onSelectAssignment={(assignment) => selectAssignment(course, assignment)}
-                  onSelectGroup={(assignment, group) => selectGroup(course, assignment, group)}
-                  onAssignmentCreated={() => loadAssignments(course)}
-                  onGroupCreated={(assignment) => loadGroups(assignment)}
-                  professorId={props.role === 'professor' ? props.professor.id : undefined}
-                />
-              ))
             )}
           </div>
           <div className="sidebar-footer">
@@ -382,6 +390,7 @@ function Dashboard(props: DashboardProps) {
             group={selectedGroup}
             role={props.role}
             professorId={props.role === 'professor' ? props.professor.id : undefined}
+            onSidebarContentChange={setSidebarContent}
           />
         ) : selectedAssignment && selectedCourse ? (
           <AssignmentDetail
@@ -748,7 +757,7 @@ function AssignmentDetail({
             )}
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10 }}>
             {groups.map((g) => (
               <button
                 key={g.id}
@@ -762,351 +771,13 @@ function AssignmentDetail({
                   <Users size={14} style={{ color: 'var(--accent)' }} />
                   <strong style={{ fontWeight: 600 }}>{g.name}</strong>
                 </div>
-                <span style={{ color: 'var(--muted)', fontSize: 12 }}>Open to view files & history</span>
+                <span style={{ color: 'var(--muted)', fontSize: 12 }}>Open group dashboard, files & history</span>
               </button>
             ))}
           </div>
         )}
       </div>
     </>
-  )
-}
-
-/* ============ Group detail (files + history + members) ============ */
-
-type GroupDetailTab = 'files' | 'history' | 'students'
-
-function GroupDetail({
-  course,
-  assignment,
-  group,
-  role,
-  professorId,
-}: {
-  course: Course
-  assignment: Assignment
-  group: Group
-  role: Role
-  professorId?: string
-}) {
-  const [files, setFiles] = useState<WorkspaceFile[] | null>(null)
-  const [activeFile, setActiveFile] = useState<WorkspaceFile | null>(null)
-  const [content, setContent] = useState<string>('')
-  const [loadingContent, setLoadingContent] = useState(false)
-  const [history, setHistory] = useState<HistoryEntry[] | null>(null)
-  const [members, setMembers] = useState<Member[]>([])
-  const [courseMembers, setCourseMembers] = useState<Member[] | null>(null)
-  const [tab, setTab] = useState<GroupDetailTab>('files')
-  const [filesCollapsed, setFilesCollapsed] = useState(false)
-  const [assigningUserId, setAssigningUserId] = useState<string | null>(null)
-
-  const refreshMembers = useCallback(() => {
-    return api<Member[]>(`/groups/${group.id}/members`).then(setMembers).catch(() => setMembers([]))
-  }, [group.id])
-
-  const openFile = useCallback(async (file: WorkspaceFile) => {
-    setActiveFile(file)
-    setLoadingContent(true)
-    try {
-      const result = await api<{ content: string }>(`/groups/${group.id}/files/content?path=${encodeURIComponent(file.path)}`)
-      setContent(result.content)
-    } catch (err) {
-      showError(err)
-      setContent('')
-    } finally {
-      setLoadingContent(false)
-    }
-  }, [group.id])
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setFiles(null); setHistory(null); setCourseMembers(null); setActiveFile(null); setContent('')
-    api<WorkspaceFile[]>(`/groups/${group.id}/files`).then((fs) => {
-      setFiles(fs)
-      if (fs.length > 0) openFile(fs[0])
-    }).catch((e) => { showError(e); setFiles([]) })
-    api<HistoryEntry[]>(`/groups/${group.id}/history`).then(setHistory).catch(() => setHistory([]))
-    refreshMembers()
-    if (role === 'professor') {
-      api<Member[]>(`/courses/${course.id}/members`).then(setCourseMembers).catch(() => setCourseMembers([]))
-    }
-  }, [course.id, group.id, openFile, refreshMembers, role])
-
-  const lastCommit = history && history.length > 0 ? history[0] : null
-  const assignedUserIds = useMemo(() => new Set(members.map((member) => member.userId)), [members])
-  const availableStudents = useMemo(
-    () => (courseMembers ?? []).filter((member) => !assignedUserIds.has(member.userId)),
-    [assignedUserIds, courseMembers],
-  )
-
-  const assignStudent = async (student: Member) => {
-    if (!professorId) return
-    setAssigningUserId(student.userId)
-    try {
-      await api<Member>(`/groups/${group.id}/members`, {
-        method: 'POST',
-        body: JSON.stringify({ professorId, userId: student.userId }),
-      })
-      toast.success(`${student.displayName} added to ${group.name}`)
-      await refreshMembers()
-    } catch (err) {
-      showError(err, 'Could not add student')
-    } finally {
-      setAssigningUserId(null)
-    }
-  }
-
-  return (
-    <>
-      <div className="detail-header compact">
-        <div className="detail-title-row">
-          <div className="title-block">
-            <span className="course-tag" title={course.name}><BookOpen size={11} /> {course.name}</span>
-            <span className="course-tag" title={assignment.name}><ClipboardList size={11} /> {assignment.name}</span>
-            <h2>{group.name}</h2>
-            <span className="meta-inline">
-              <Users size={11} /> {members.length}
-              {lastCommit && (
-                <>
-                  <span className="dot-sep" />
-                  <GitCommit size={11} /> {relativeTime(lastCommit.when)}
-                </>
-              )}
-            </span>
-          </div>
-          {group.cloneUrl && <CloneUrlButton url={group.cloneUrl} />}
-        </div>
-      </div>
-
-      <div className="group-workspace">
-        <div className="tabs">
-          {role === 'professor' && (
-            <button className={tab === 'students' ? 'active' : ''} onClick={() => setTab('students')}>
-              <UserPlus size={13} /> Add Students
-            </button>
-          )}
-          <button className={tab === 'files' ? 'active' : ''} onClick={() => setTab('files')}>
-            <FileText size={13} /> Files
-          </button>
-          <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}>
-            <GitCommit size={13} /> History
-            {history && history.length > 0 && (
-              <span style={{ marginLeft: 4, fontSize: 11, color: 'var(--muted)' }}>{history.length}</span>
-            )}
-          </button>
-        </div>
-
-        <div className="tab-body">
-          {tab === 'files' ? (
-            <div className={`file-layout ${filesCollapsed ? 'files-collapsed' : ''}`}>
-              <div className="file-list-pane">
-                <button
-                  className="file-collapse-button"
-                  onClick={() => setFilesCollapsed((collapsed) => !collapsed)}
-                  title={filesCollapsed ? 'Show files' : 'Collapse files'}
-                  aria-label={filesCollapsed ? 'Show files' : 'Collapse files'}
-                >
-                  {filesCollapsed ? <FileText size={15} /> : <PanelLeftClose size={15} />}
-                </button>
-                <div className="file-list">
-                  {files === null ? (
-                    <>
-                      <div className="skeleton-row" />
-                      <div className="skeleton-row" style={{ width: '60%' }} />
-                      <div className="skeleton-row" style={{ width: '80%' }} />
-                    </>
-                  ) : files.length === 0 ? (
-                    <div style={{ padding: 16, fontSize: 12.5, color: 'var(--muted)', textAlign: 'center' }}>
-                      No files yet.
-                    </div>
-                  ) : (
-                    files.map((file) => (
-                      <button
-                        key={file.path}
-                        className={`file-row ${activeFile?.path === file.path ? 'active' : ''}`}
-                        onClick={() => openFile(file)}
-                        title={file.path}
-                      >
-                        <FileIcon name={file.name} active={activeFile?.path === file.path} />
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.path}</span>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </div>
-              <CodePane file={activeFile} content={content} loading={loadingContent} />
-            </div>
-          ) : tab === 'history' ? (
-            <HistoryView entries={history} />
-          ) : (
-            <AddStudentsView
-              courseMembers={courseMembers}
-              groupMembers={members}
-              availableStudents={availableStudents}
-              assigningUserId={assigningUserId}
-              onAssign={assignStudent}
-            />
-          )}
-        </div>
-      </div>
-    </>
-  )
-}
-
-function AddStudentsView({
-  courseMembers,
-  groupMembers,
-  availableStudents,
-  assigningUserId,
-  onAssign,
-}: {
-  courseMembers: Member[] | null
-  groupMembers: Member[]
-  availableStudents: Member[]
-  assigningUserId: string | null
-  onAssign: (student: Member) => void
-}) {
-  if (courseMembers === null) {
-    return (
-      <div className="students-panel">
-        <div className="skeleton-row" />
-        <div className="skeleton-row" style={{ width: '70%' }} />
-        <div className="skeleton-row" style={{ width: '85%' }} />
-      </div>
-    )
-  }
-
-  if (courseMembers.length === 0) {
-    return (
-      <div className="detail-empty">
-        <div className="icon-circle"><Users size={22} /></div>
-        <h3>No students in this course</h3>
-        <p>Students will appear here after they join the course with the course code.</p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="students-panel">
-      <section className="student-section">
-        <div className="student-section-header">
-          <h3>Available students</h3>
-          <span>{availableStudents.length}</span>
-        </div>
-        {availableStudents.length === 0 ? (
-          <div className="student-empty">Every course student is already in this group.</div>
-        ) : (
-          <div className="student-list">
-            {availableStudents.map((student) => (
-              <div className="student-row" key={student.userId}>
-                <div className="student-avatar">{initials(student.displayName)}</div>
-                <div className="student-main">
-                  <span className="student-name">{student.displayName}</span>
-                  <span className="student-meta">Joined course {relativeTime(student.joinedAt)}</span>
-                </div>
-                <button
-                  className="btn btn-sm btn-primary"
-                  disabled={assigningUserId === student.userId}
-                  onClick={() => onAssign(student)}
-                >
-                  <UserPlus size={12} />
-                  {assigningUserId === student.userId ? 'Adding' : 'Add'}
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="student-section">
-        <div className="student-section-header">
-          <h3>Current group</h3>
-          <span>{groupMembers.length}</span>
-        </div>
-        {groupMembers.length === 0 ? (
-          <div className="student-empty">No students have been added to this group yet.</div>
-        ) : (
-          <div className="student-list compact">
-            {groupMembers.map((student) => (
-              <div className="student-row" key={student.userId}>
-                <div className="student-avatar">{initials(student.displayName)}</div>
-                <div className="student-main">
-                  <span className="student-name">{student.displayName}</span>
-                  <span className="student-meta">Added {relativeTime(student.joinedAt)}</span>
-                </div>
-                <span className="student-status">Assigned</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-    </div>
-  )
-}
-
-function FileIcon({ name, active }: { name: string; active: boolean }) {
-  const isCode = /\.(ts|tsx|js|jsx|py|go|rs|java|c|cpp|cs|rb|php|html|css|json|yaml|yml|sh|md)$/i.test(name)
-  const Icon = active ? (isCode ? FileCode : FileText) : (isCode ? FileCode : FileText)
-  return <Icon size={12} className="icon" />
-}
-
-/* ============ Code pane ============ */
-
-function CodePane({ file, content, loading }: { file: WorkspaceFile | null; content: string; loading: boolean }) {
-  const [html, setHtml] = useState<string>('')
-  const lang = file ? detectLanguage(file.name) : 'plaintext'
-  const isBinary = content.startsWith('Binary file') || content === 'File is too large to preview.'
-  const lineCount = content ? content.split('\n').length : 0
-
-  useEffect(() => {
-    let cancelled = false
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (!file || !content || isBinary) { setHtml(''); return }
-    highlight(content, lang).then((h) => { if (!cancelled) setHtml(h) }).catch(() => { if (!cancelled) setHtml('') })
-    return () => { cancelled = true }
-  }, [file, content, lang, isBinary])
-
-  if (!file) {
-    return (
-      <div className="code-pane">
-        <div className="code-header"><span className="file-info"><FileText size={13} /> <span style={{ color: 'var(--muted)' }}>No file selected</span></span></div>
-        <div className="code-empty">
-          <div className="icon-circle"><FileCode size={20} /></div>
-          <div>Select a file from the list to preview it.</div>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="code-pane">
-      <div className="code-header">
-        <div className="file-info">
-          <FileCode size={13} className="icon" />
-          <span className="name">{file.name}</span>
-          <span className="meta">· {file.path}</span>
-        </div>
-        <div className="meta">
-          {!isBinary && lineCount > 0 && <span>{lineCount} {lineCount === 1 ? 'line' : 'lines'}</span>}
-          <span className="lang-badge">{lang}</span>
-          <CopyButton text={content} disabled={isBinary || !content} />
-        </div>
-      </div>
-      <div className={`code-body ${isBinary ? '' : 'with-gutter'}`}>
-        {loading ? (
-          <div style={{ padding: 16, color: 'var(--muted)' }}>Loading…</div>
-        ) : isBinary || !content ? (
-          <div className="code-empty">
-            <div className="icon-circle"><FileText size={20} /></div>
-            <div>{isBinary ? content : 'Empty file.'}</div>
-          </div>
-        ) : html ? (
-          <div dangerouslySetInnerHTML={{ __html: html }} />
-        ) : (
-          <pre style={{ margin: 0, padding: 14 }}><code>{content}</code></pre>
-        )}
-      </div>
-    </div>
   )
 }
 
@@ -1135,82 +806,5 @@ function CopyChip({ label, value, accent, mono }: { label: string; value: string
   )
 }
 
-function CloneUrlButton({ url }: { url: string }) {
-  const [copied, setCopied] = useState(false)
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(url)
-      setCopied(true)
-      toast.success('Clone URL copied')
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      toast.error('Copy failed')
-    }
-  }
-  return (
-    <button className={`clone-url ${copied ? 'copied' : ''}`} onClick={copy} title={url}>
-      {copied ? <Check size={12} /> : <Copy size={12} />}
-      <span>{copied ? 'Copied' : 'Clone URL'}</span>
-    </button>
-  )
-}
-
-function CopyButton({ text, disabled }: { text: string; disabled?: boolean }) {
-  const [copied, setCopied] = useState(false)
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      toast.error('Copy failed')
-    }
-  }
-  return (
-    <button className={`copy-btn ${copied ? 'copied' : ''}`} onClick={copy} disabled={disabled} title="Copy contents">
-      {copied ? <Check size={11} /> : <Copy size={11} />}
-      {copied ? 'Copied' : 'Copy'}
-    </button>
-  )
-}
-
-/* ============ History ============ */
-
-function HistoryView({ entries }: { entries: HistoryEntry[] | null }) {
-  if (entries === null) {
-    return (
-      <div style={{ padding: 16 }}>
-        <div className="skeleton-row" />
-        <div className="skeleton-row" style={{ width: '70%' }} />
-        <div className="skeleton-row" style={{ width: '85%' }} />
-      </div>
-    )
-  }
-  if (entries.length === 0) {
-    return (
-      <div className="detail-empty">
-        <div className="icon-circle"><GitCommit size={22} /></div>
-        <h3>No commits yet</h3>
-        <p>Commits will appear here once team members push to the repository.</p>
-      </div>
-    )
-  }
-  return (
-    <div className="history-list">
-      {entries.map((entry) => (
-        <div className="history-row" key={entry.hash} title={entry.message}>
-          <span className="commit-dot" />
-          <span className="message">{entry.message}</span>
-          <span className="hash">{entry.hash.slice(0, 7)}</span>
-          <span className="meta-line">
-            {entry.pushedBy && <span>Pushed by: {entry.pushedBy}</span>}
-            {entry.pushedBy && <span>·</span>}
-            <span className="when" title={entry.when}>{relativeTime(entry.when)}</span>
-          </span>
-        </div>
-      ))}
-    </div>
-  )
-}
 
 export default App

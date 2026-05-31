@@ -4,6 +4,8 @@ node_modules/
 # local database
 *.sqlite
 *.sqlite-*
+*.sqlite3
+*.sqlite3-*
 *.db
 *.db-*
 
@@ -26,5 +28,6 @@ group_repos/
 Thumbs.db
 
 # env / secrets
-*.env
-*.env.example
+.env
+.env.*
+!.env.example

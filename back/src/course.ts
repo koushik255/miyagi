@@ -26,16 +26,19 @@ export const Course = {
   assignStudent(joinCode: string, userId: string): CourseMember {
     const course = this.findByJoinCode(joinCode);
     if (!course) throw new Error("Course not found for join code");
+    return this.assignStudentByCourseId(course.id, userId);
+  },
 
+  assignStudentByCourseId(courseId: string, userId: string): CourseMember {
     const member: NewCourseMember = {
       id: crypto.randomUUID(),
       userId,
-      courseId: course.id,
+      courseId,
       role: "student",
       joinedAt: nowIso(),
     };
 
-    return db.insert(courseMembers).values(member).onConflictDoNothing().returning().get() ?? this.findMember(userId, course.id)!;
+    return db.insert(courseMembers).values(member).onConflictDoNothing().returning().get() ?? this.findMember(userId, courseId)!;
   },
 
   findById(courseId: string): Course | undefined {

@@ -10,6 +10,8 @@ build/
 out/
 release/
 .esbuild/
+.vite/
+.vite-temp/
 backend-uml.html
 vite/
 
@@ -34,6 +36,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+bun-debug.log*
 
 # Environment / secrets
 .env
@@ -48,6 +51,7 @@ node_modules/.tmp/
 .cache/
 .parcel-cache/
 .turbo/
+.bun/
 
 # Test / coverage output
 coverage/
@@ -83,6 +87,8 @@ tmp/
 # Backend
 *.sqlite
 *.sqlite-*
+*.sqlite3
+*.sqlite3-*
 *.db
 *.db-*
 cli/.session.json

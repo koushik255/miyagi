@@ -7,7 +7,7 @@ export type Assignment = typeof assignments.$inferSelect;
 export type NewAssignment = typeof assignments.$inferInsert;
 
 export const Assignment = {
-  create(input: { professorId: string; courseId: string; name: string; description?: string; dueDate?: string }): Assignment {
+  create(input: { professorId: string; courseId: string; name: string; description?: string; dueDate?: string; repositoryMode?: "local" | "github" }): Assignment {
     const course = Course.findById(input.courseId);
     if (!course) throw new Error("Course not found");
     if (course.professorId !== input.professorId) throw new Error("Course does not belong to professor");
@@ -20,6 +20,7 @@ export const Assignment = {
       description: input.description ?? "",
       dueDate: input.dueDate || null,
       professorId: input.professorId,
+      repositoryMode: input.repositoryMode ?? "local",
       createdAt: timestamp,
       updatedAt: timestamp,
     };
