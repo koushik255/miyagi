@@ -5,10 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "dev:out": "node scripts/dev.mjs --out",
-    "dev:tunnel": "node scripts/dev.mjs -e",
+    "dev:dual": "node scripts/dev-dual.mjs",
     "dev:web": "vite",
-    "dev:web:tunnel": "cross-env VITE_MIYAGI_API_BASE=https://miyagi.koushikkoushik.com vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
@@ -32,7 +30,7 @@
     "@vitejs/plugin-react": "^6.0.1",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
-    "electron": "^42.0.0",
+    "electron": "^42.4.1",
     "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
@@ -42,5 +40,8 @@
     "vite": "^8.0.10",
     "wait-on": "^9.0.5"
   },
-  "main": "electron/main.cjs"
+  "main": "electron/main.cjs",
+  "allowScripts": {
+    "electron@42.0.0": true
+  }
 }

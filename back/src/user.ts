@@ -1,12 +1,20 @@
 import { eq, notInArray, or } from "drizzle-orm";
 import { db, nowIso } from "./db";
+import { badRequest } from "./errors";
 import { professors, users } from "./schema";
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 
 export const User = {
-  createAnonymousUser(deviceHash: string, displayName = "Anonymous", password?: string, email?: string, studentId?: string): User {
+  createAnonymousUser(
+    deviceHash: string,
+    displayName = "Anonymous",
+    password?: string,
+    email?: string,
+    studentId?: string,
+    githubUsername?: string,
+  ): User {
     const timestamp = nowIso();
     const user: NewUser = {
       id: crypto.randomUUID(),
@@ -14,6 +22,7 @@ export const User = {
       displayName,
       email: email ?? null,
       studentId: studentId ?? null,
+      githubUsername: githubUsername ?? null,
       password: password ?? null,
       createdAt: timestamp,
       lastSeenAt: timestamp,
@@ -25,25 +34,40 @@ export const User = {
   createOrGet(deviceHash: string, displayName = "Anonymous", password?: string): User {
     const existing = this.findByDeviceHash(deviceHash);
     if (existing) {
-      if (password && !existing.password) this.setPassword(existing.id, password);
+      if (password && existing.password !== password) this.setPassword(existing.id, password);
       return this.updatePresence(existing.id);
     }
 
     return this.createAnonymousUser(deviceHash, displayName, password);
   },
 
-  createOrUpdateStudent(input: { studentId?: string; name: string; email: string }): User {
-    const existing = this.findByEmail(input.email) ?? (input.studentId ? this.findByStudentId(input.studentId) : undefined);
+  createOrUpdateStudent(input: { studentId?: string; name: string; email?: string; username?: string; password?: string }): User {
+    const username = input.username?.trim() || undefined;
+    const email = input.email?.trim() || (username ? `${username}@example.edu` : undefined);
+    const password = username ?? email;
+    if (!username && !email) badRequest("Student requires a username or email");
+    const deviceHash = username ?? email!;
+    const existing = this.findByDeviceHash(deviceHash)
+      ?? (email ? this.findByEmail(email) : undefined)
+      ?? (input.studentId ? this.findByStudentId(input.studentId) : undefined);
     if (existing) {
       return db
         .update(users)
-        .set({ displayName: input.name, email: input.email, studentId: input.studentId ?? existing.studentId, lastSeenAt: nowIso() })
+        .set({
+          deviceHash,
+          displayName: input.name,
+          email: email ?? existing.email,
+          studentId: input.studentId ?? existing.studentId,
+          githubUsername: existing.githubUsername,
+          password: password ?? existing.password,
+          lastSeenAt: nowIso(),
+        })
         .where(eq(users.id, existing.id))
         .returning()
         .get();
     }
 
-    return this.createAnonymousUser(input.email, input.name, undefined, input.email, input.studentId);
+    return this.createAnonymousUser(deviceHash, input.name, password, email, input.studentId);
   },
 
   login(deviceHash: string, password: string): User | undefined {
@@ -54,6 +78,10 @@ export const User = {
 
   setPassword(id: string, password: string): User {
     return db.update(users).set({ password }).where(eq(users.id, id)).returning().get();
+  },
+
+  setGithubUsername(id: string, githubUsername?: string): User {
+    return db.update(users).set({ githubUsername: githubUsername?.trim() || null }).where(eq(users.id, id)).returning().get();
   },
 
   findByDeviceHash(deviceHash: string): User | undefined {

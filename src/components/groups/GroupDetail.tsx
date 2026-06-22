@@ -1,19 +1,31 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
-import { BookOpen, Users, FileText, GitCommit, PanelLeftClose, ClipboardList, UserPlus, Copy, Check, BarChart3 } from 'lucide-react'
+import { BookOpen, Users, GitCommit, ClipboardList, UserPlus, Copy, Check, BarChart3 } from 'lucide-react'
 import { api } from '../../api'
 import { initials, relativeTime } from '../../format'
-import { CodeViewer } from '../workspace/CodeViewer'
 import { DiffViewer } from '../workspace/DiffViewer'
-import { WorkspaceTree } from '../workspace/WorkspaceTree'
-import type { Assignment, Course, Group, GroupDiff, HistoryEntry, Member, Role, WorkspaceFile } from '../../types'
+import type { Assignment, Course, Group, GroupDiff, HistoryEntry, Member, Role } from '../../types'
 import { PerformanceDashboard } from './PerformanceDashboard'
 
 function showError(err: unknown, fallback = 'Something went wrong') {
   toast.error(err instanceof Error ? err.message : fallback)
 }
 
-type GroupDetailTab = 'dashboard' | 'files' | 'history' | 'students' | 'group'
+type GroupDetailTab = 'dashboard' | 'history' | 'students' | 'group'
+function getRepositoryTabCopy(isGithubConnected: boolean) {
+  if (isGithubConnected) {
+    return {
+      historyEmptyTitle: 'No repository history yet',
+      historyEmptyDescription: 'Commits will appear here once this GitHub repository has activity.',
+      historySidebarEmpty: 'No repository history yet.',
+    }
+  }
+  return {
+    historyEmptyTitle: 'No commits yet',
+    historyEmptyDescription: 'Commits will appear here once team members push to the repository.',
+    historySidebarEmpty: 'No commits yet.',
+  }
+}
 
 export function GroupDetail({
   course,
@@ -22,6 +34,7 @@ export function GroupDetail({
   role,
   professorId,
   onSidebarContentChange,
+  onGroupUpdated,
 }: {
   course: Course
   assignment: Assignment
@@ -29,11 +42,8 @@ export function GroupDetail({
   role: Role
   professorId?: string
   onSidebarContentChange?: (content: ReactNode | null) => void
+  onGroupUpdated?: (group: Group) => void
 }) {
-  const [files, setFiles] = useState<WorkspaceFile[] | null>(null)
-  const [activeFile, setActiveFile] = useState<WorkspaceFile | null>(null)
-  const [content, setContent] = useState<string>('')
-  const [loadingContent, setLoadingContent] = useState(false)
   const [history, setHistory] = useState<HistoryEntry[] | null>(null)
   const [activeHistoryEntry, setActiveHistoryEntry] = useState<HistoryEntry | null>(null)
   const [diffPatch, setDiffPatch] = useState('')
@@ -41,26 +51,19 @@ export function GroupDetail({
   const [members, setMembers] = useState<Member[]>([])
   const [courseMembers, setCourseMembers] = useState<Member[] | null>(null)
   const [tab, setTab] = useState<GroupDetailTab>('dashboard')
-  const [filesCollapsed, setFilesCollapsed] = useState(false)
   const [assigningUserId, setAssigningUserId] = useState<string | null>(null)
+  const [githubDialogOpen, setGithubDialogOpen] = useState(false)
+  const [githubRepoUrl, setGithubRepoUrl] = useState(group.githubRepoUrl ?? '')
+  const [connectingGithub, setConnectingGithub] = useState(false)
+  const [dashboardRefreshKey, setDashboardRefreshKey] = useState(0)
+  const isGithubConnected = Boolean(group.githubRepoUrl) || group.repositoryProvider === 'github'
+  const repositoryTabCopy = getRepositoryTabCopy(isGithubConnected)
 
   const refreshMembers = useCallback(() => {
     return api<Member[]>(`/groups/${group.id}/members`).then(setMembers).catch(() => setMembers([]))
   }, [group.id])
 
-  const openFile = useCallback(async (file: WorkspaceFile) => {
-    setActiveFile(file)
-    setLoadingContent(true)
-    try {
-      const result = await api<{ content: string }>(`/groups/${group.id}/files/content?path=${encodeURIComponent(file.path)}`)
-      setContent(result.content)
-    } catch (err) {
-      showError(err)
-      setContent('')
-    } finally {
-      setLoadingContent(false)
-    }
-  }, [group.id])
+
 
   const openDiff = useCallback(async (entry: HistoryEntry) => {
     setActiveHistoryEntry(entry)
@@ -76,22 +79,46 @@ export function GroupDetail({
     }
   }, [group.id])
 
+  const loadHistory = useCallback(async () => {
+    try {
+      const entries = await api<HistoryEntry[]>(`/groups/${group.id}/history`)
+      setHistory(entries)
+      if (entries.length > 0) {
+        void openDiff(entries[0])
+      } else {
+        setActiveHistoryEntry(null)
+        setDiffPatch('')
+      }
+    } catch {
+      setHistory([])
+    }
+  }, [group.id, openDiff])
+
+  const fetchLatestRepository = useCallback(async (notify = true) => {
+    if (!isGithubConnected) return
+    try {
+      const updatedGroup = await api<Group>(`/groups/${group.id}/github/fetch`, { method: 'POST' })
+      onGroupUpdated?.(updatedGroup)
+      setDashboardRefreshKey((value) => value + 1)
+      await loadHistory()
+      if (notify) toast.success('Repository updated')
+    } catch (err) {
+      if (notify) showError(err, 'Could not fetch latest repository changes')
+    }
+  }, [group.id, isGithubConnected, loadHistory, onGroupUpdated])
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setFiles(null); setHistory(null); setCourseMembers(null); setActiveFile(null); setActiveHistoryEntry(null); setContent(''); setDiffPatch(''); setLoadingDiff(false)
-    api<WorkspaceFile[]>(`/groups/${group.id}/files`).then((fs) => {
-      setFiles(fs)
-      if (fs.length > 0) openFile(fs[0])
-    }).catch((e) => { showError(e); setFiles([]) })
-    api<HistoryEntry[]>(`/groups/${group.id}/history`).then((entries) => {
-      setHistory(entries)
-      if (entries.length > 0) openDiff(entries[0])
-    }).catch(() => setHistory([]))
+    setHistory(null); setCourseMembers(null); setActiveHistoryEntry(null); setDiffPatch(''); setLoadingDiff(false)
+    void loadHistory()
     refreshMembers()
     if (role === 'professor') {
       api<Member[]>(`/courses/${course.id}/members`).then(setCourseMembers).catch(() => setCourseMembers([]))
     }
-  }, [course.id, group.id, openDiff, openFile, refreshMembers, role])
+    if (isGithubConnected) {
+      void fetchLatestRepository(false)
+    }
+  }, [course.id, fetchLatestRepository, group.id, isGithubConnected, loadHistory, refreshMembers, role])
 
   const lastCommit = history && history.length > 0 ? history[0] : null
   const assignedUserIds = useMemo(() => new Set(members.map((member) => member.userId)), [members])
@@ -105,29 +132,44 @@ export function GroupDetail({
     return (
       <HistoryCommitList
         entries={history}
+        emptyMessage={repositoryTabCopy.historySidebarEmpty}
         selectedHash={activeHistoryEntry?.hash ?? null}
         onSelect={openDiff}
       />
     )
-  }, [activeHistoryEntry?.hash, history, openDiff, tab])
+  }, [activeHistoryEntry?.hash, history, openDiff, repositoryTabCopy.historySidebarEmpty, tab])
 
   useEffect(() => {
     onSidebarContentChange?.(historySidebarContent)
     return () => onSidebarContentChange?.(null)
   }, [historySidebarContent, onSidebarContentChange])
 
-  const connectGithub = async () => {
+  useEffect(() => {
+    setGithubDialogOpen(false)
+    setGithubRepoUrl(group.githubRepoUrl ?? '')
+    setConnectingGithub(false)
+  }, [group.githubRepoUrl, group.id])
+
+  const connectGithub = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
     if (!professorId) return
-    const githubRepoUrl = window.prompt('GitHub repository URL for this group', group.githubRepoUrl ?? '')
-    if (!githubRepoUrl) return
+    const nextGithubRepoUrl = githubRepoUrl.trim()
+    if (!nextGithubRepoUrl) return
     try {
-      await api<Group>(`/groups/${group.id}/github`, {
+      setConnectingGithub(true)
+      const updatedGroup = await api<Group>(`/groups/${group.id}/github`, {
         method: 'PATCH',
-        body: JSON.stringify({ professorId, githubRepoUrl }),
+        body: JSON.stringify({ professorId, githubRepoUrl: nextGithubRepoUrl }),
       })
-      toast.success('GitHub repository connected. Reopen the group or switch periods to refresh stats.')
+      onGroupUpdated?.(updatedGroup)
+      setDashboardRefreshKey((value) => value + 1)
+      setGithubDialogOpen(false)
+      setGithubRepoUrl(updatedGroup.githubRepoUrl ?? nextGithubRepoUrl)
+      toast.success('GitHub repository connected.')
     } catch (err) {
       showError(err, 'Could not connect GitHub repository')
+    } finally {
+      setConnectingGithub(false)
     }
   }
 
@@ -173,18 +215,15 @@ export function GroupDetail({
               </button>
               {role === 'professor' && (
                 <button className={tab === 'students' ? 'active' : ''} onClick={() => setTab('students')}>
-                  <UserPlus size={13} /> Add Students
+                  <Users size={13} /> Students
                 </button>
               )}
               {role === 'student' && (
                 <button className={tab === 'group' ? 'active' : ''} onClick={() => setTab('group')}>
-                  <Users size={13} /> Group
+                  <Users size={13} /> Students
                   <span style={{ marginLeft: 4, fontSize: 11, color: 'var(--muted)' }}>{members.length}</span>
                 </button>
               )}
-              <button className={tab === 'files' ? 'active' : ''} onClick={() => setTab('files')}>
-                <FileText size={13} /> Files
-              </button>
               <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}>
                 <GitCommit size={13} /> History
                 {history && history.length > 0 && (
@@ -193,7 +232,9 @@ export function GroupDetail({
               </button>
             </div>
             {role === 'professor' && (
-              <button className="btn btn-sm" onClick={connectGithub}>Connect GitHub</button>
+              <button className={`btn btn-sm ${group.githubRepoUrl ? 'btn-success' : ''}`} onClick={() => setGithubDialogOpen(true)}>
+                {group.githubRepoUrl ? 'GitHub Connected' : 'Connect GitHub'}
+              </button>
             )}
             {group.cloneUrl && <CloneUrlButton url={group.cloneUrl} />}
           </div>
@@ -203,39 +244,19 @@ export function GroupDetail({
       <div className="group-workspace">
         <div className="tab-body">
           {tab === 'dashboard' ? (
-            <PerformanceDashboard kind="group" id={group.id} />
-          ) : tab === 'files' ? (
-            <div className={`file-layout ${filesCollapsed ? 'files-collapsed' : ''}`}>
-              <div className="file-list-pane">
-                <button
-                  className="file-collapse-button"
-                  onClick={() => setFilesCollapsed((collapsed) => !collapsed)}
-                  title={filesCollapsed ? 'Show files' : 'Collapse files'}
-                  aria-label={filesCollapsed ? 'Show files' : 'Collapse files'}
-                >
-                  {filesCollapsed ? <FileText size={15} /> : <PanelLeftClose size={15} />}
-                </button>
-                <div className="file-list">
-                  {files === null ? (
-                    <>
-                      <div className="skeleton-row" />
-                      <div className="skeleton-row" style={{ width: '60%' }} />
-                      <div className="skeleton-row" style={{ width: '80%' }} />
-                    </>
-                  ) : files.length === 0 ? (
-                    <div style={{ padding: 16, fontSize: 12.5, color: 'var(--muted)', textAlign: 'center' }}>
-                      No files yet.
-                    </div>
-                  ) : (
-                    <WorkspaceTree files={files} activePath={activeFile?.path ?? null} onOpenFile={openFile} />
-                  )}
-                </div>
-              </div>
-              <CodeViewer file={activeFile} content={content} loading={loadingContent} />
-            </div>
+            <PerformanceDashboard
+              kind="group"
+              id={group.id}
+              refreshKey={dashboardRefreshKey}
+              showFetchLatest={isGithubConnected}
+              onFetchLatest={() => fetchLatestRepository(true)}
+              canInspectStudents={role === 'professor'}
+            />
           ) : tab === 'history' ? (
             <HistoryView
               entries={history}
+              emptyTitle={repositoryTabCopy.historyEmptyTitle}
+              emptyDescription={repositoryTabCopy.historyEmptyDescription}
               diff={<DiffViewer entry={activeHistoryEntry} loading={loadingDiff} patch={diffPatch} />}
             />
           ) : tab === 'group' ? (
@@ -251,6 +272,41 @@ export function GroupDetail({
           )}
         </div>
       </div>
+      {githubDialogOpen && (
+        <div
+          className="modal-backdrop"
+          onClick={(event) => {
+            if (event.target === event.currentTarget && !connectingGithub) setGithubDialogOpen(false)
+          }}
+        >
+          <form className="modal-card" onSubmit={connectGithub}>
+            <div className="modal-head">
+              <div>
+                <h3>Connect GitHub repository</h3>
+                <p>Paste the GitHub URL for this group’s project.</p>
+              </div>
+            </div>
+            <div className="modal-body">
+              <label htmlFor="github-repo-url">GitHub repository URL</label>
+              <input
+                id="github-repo-url"
+                value={githubRepoUrl}
+                onChange={(event) => setGithubRepoUrl(event.target.value)}
+                placeholder="https://github.com/owner/repository"
+                autoFocus
+              />
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-sm" onClick={() => setGithubDialogOpen(false)} disabled={connectingGithub}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-sm btn-primary" disabled={connectingGithub || githubRepoUrl.trim().length === 0}>
+                {connectingGithub ? 'Connecting…' : 'Connect GitHub'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </>
   )
 }
@@ -400,9 +456,13 @@ function CloneUrlButton({ url }: { url: string }) {
 function HistoryView({
   entries,
   diff,
+  emptyTitle,
+  emptyDescription,
 }: {
   entries: HistoryEntry[] | null
   diff: ReactNode
+  emptyTitle: string
+  emptyDescription: string
 }) {
   if (entries === null) {
     return (
@@ -417,8 +477,8 @@ function HistoryView({
     return (
       <div className="detail-empty">
         <div className="icon-circle"><GitCommit size={22} /></div>
-        <h3>No commits yet</h3>
-        <p>Commits will appear here once team members push to the repository.</p>
+        <h3>{emptyTitle}</h3>
+        <p>{emptyDescription}</p>
       </div>
     )
   }
@@ -431,10 +491,12 @@ function HistoryView({
 
 function HistoryCommitList({
   entries,
+  emptyMessage,
   selectedHash,
   onSelect,
 }: {
   entries: HistoryEntry[] | null
+  emptyMessage: string
   selectedHash: string | null
   onSelect: (entry: HistoryEntry) => void
 }) {
@@ -449,7 +511,7 @@ function HistoryCommitList({
   }
 
   if (entries.length === 0) {
-    return <div className="sidebar-empty">No commits yet.</div>
+    return <div className="sidebar-empty">{emptyMessage}</div>
   }
 
   return (

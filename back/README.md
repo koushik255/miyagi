@@ -3,9 +3,9 @@ To install dependencies:
 bun install
 ```
 
-To run:
+To run the local API:
 ```sh
 bun run dev
 ```
 
-open http://localhost:3000
+The API listens on http://localhost:3000.

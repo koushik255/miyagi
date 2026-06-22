@@ -1,5 +1,8 @@
 import { and, eq } from "drizzle-orm";
 import { db, nowIso } from "./db";
+import { notFound } from "./errors";
+import { requireCourseMember } from "./guards";
+import { generateJoinCode, isUniqueConstraintError } from "./join-code";
 import { courseMembers, courses, professors, users } from "./schema";
 
 export type Course = typeof courses.$inferSelect;
@@ -10,22 +13,30 @@ export type NewCourseMember = typeof courseMembers.$inferInsert;
 export const Course = {
   create(professorId: string, name: string): Course {
     const professor = db.select().from(professors).where(eq(professors.id, professorId)).get();
-    if (!professor) throw new Error("Professor session not found. Please sign out and sign in again.");
+    if (!professor) notFound("Professor session not found. Please sign out and sign in again.");
 
-    const course: NewCourse = {
-      id: crypto.randomUUID(),
-      name,
-      joinCode: this.generateJoinCode(),
-      professorId,
-      createdAt: nowIso(),
-    };
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const course: NewCourse = {
+        id: crypto.randomUUID(),
+        name,
+        joinCode: generateJoinCode(),
+        professorId,
+        createdAt: nowIso(),
+      };
 
-    return db.insert(courses).values(course).returning().get();
+      try {
+        return db.insert(courses).values(course).returning().get();
+      } catch (error) {
+        if (!isUniqueConstraintError(error)) throw error;
+      }
+    }
+
+    throw new Error("Could not generate a unique course join code");
   },
 
   assignStudent(joinCode: string, userId: string): CourseMember {
     const course = this.findByJoinCode(joinCode);
-    if (!course) throw new Error("Course not found for join code");
+    if (!course) notFound("Course not found for join code");
     return this.assignStudentByCourseId(course.id, userId);
   },
 
@@ -75,6 +86,7 @@ export const Course = {
       .select({
         memberId: courseMembers.id,
         userId: users.id,
+        username: users.deviceHash,
         displayName: users.displayName,
         role: courseMembers.role,
         joinedAt: courseMembers.joinedAt,
@@ -93,7 +105,7 @@ export const Course = {
       .get();
   },
 
-  generateJoinCode(): string {
-    return Math.random().toString(36).slice(2, 8).toUpperCase();
+  requireMember(userId: string, courseId: string): CourseMember {
+    return requireCourseMember(userId, courseId);
   },
 };

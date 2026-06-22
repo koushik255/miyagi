@@ -10,34 +10,23 @@ bun install
 
 ## Run
 
-Backend:
+Start the local API:
 
 ```sh
 cd back
 bun run dev
 ```
 
-Frontend/Electron:
+Start the Electron app against the local API:
 
 ```sh
 npm run dev
 ```
 
-Web only:
+Or run the web app only:
 
 ```sh
 npm run dev:web
-```
-
-Tunnel mode:
-
-```sh
-cd back
-bun run dev:tunnel
-```
-
-```sh
-npm run dev:out
 ```
 
 ## Check

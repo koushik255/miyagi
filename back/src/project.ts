@@ -1,3 +1,6 @@
+import { forbidden } from "./errors";
+import { Group } from "./group";
+import { requireGroupOwnedByProfessor } from "./guards";
 import { db, nowIso } from "./db";
 import { projects } from "./schema";
 
@@ -21,6 +24,11 @@ export const Project = {
     rootPathHint?: string;
     dueDate?: string;
   }): Project {
+    requireGroupOwnedByProfessor(input.groupId, input.assignedByProfessorId);
+    if (input.assignedStudentId && !Group.findMember(input.assignedStudentId, input.groupId)) {
+      forbidden("Assigned student must belong to the group");
+    }
+
     const timestamp = nowIso();
     const project: NewProject = {
       id: crypto.randomUUID(),

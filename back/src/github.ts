@@ -1,19 +1,43 @@
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { db } from "./db";
-import { groupMembers, groups, users } from "./schema";
+import { runGit } from "./git-command";
+import { listDashboardMembers } from "./group-member-read-model";
+import { getGroupCommitActivity } from "./history";
+import { groups } from "./schema";
 
 type GitHubCommitListItem = {
   sha: string;
   html_url: string;
-  author?: { login: string } | null;
-  commit: { author?: { name?: string; date?: string }; message: string };
+  author: { login: string } | null;
+  commit: { author?: { date?: string | null } | null };
 };
 
-type GitHubCommitDetail = {
-  sha: string;
-  stats?: { additions: number; deletions: number; total: number };
-  files?: unknown[];
+type GitHubMirrorConfig = {
+  groupId: string;
+  githubRepoUrl: string;
+  githubOwner: string;
+  githubRepo: string;
+  repoPath?: string | null;
 };
+
+type GitHubCommitCacheEntry = {
+  githubUsername: string | null;
+  htmlUrl: string | null;
+  committedAt: string | null;
+};
+
+const GITHUB_MIRRORS_ROOT = process.env.GITHUB_MIRRORS_ROOT
+  ?? join(process.env.MIYAGI_DATA_ROOT ?? defaultDataRoot(), "github_mirrors");
+const CACHE_FILE = "miyagi-github-cache.json";
+
+function defaultDataRoot() {
+  if (process.platform === "darwin") return join(homedir(), "Library", "Application Support", "Miyagi");
+  if (process.platform === "win32") return join(process.env.APPDATA ?? homedir(), "Miyagi");
+  return join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "miyagi");
+}
 
 async function githubFetch<T>(path: string): Promise<T> {
   const headers: Record<string, string> = {
@@ -27,43 +51,120 @@ async function githubFetch<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function getGroupGithubActivity(groupId: string) {
+function mirrorPathForGroup(groupId: string) {
+  return join(GITHUB_MIRRORS_ROOT, `${groupId}.git`);
+}
+
+function cachePath(repoPath: string) {
+  return join(repoPath, CACHE_FILE);
+}
+
+function refreshGithubCommitCache(config: GitHubMirrorConfig, repoPath: string) {
+  return githubFetch<GitHubCommitListItem[]>(`/repos/${config.githubOwner}/${config.githubRepo}/commits?per_page=100`)
+    .then((commits) => {
+      const nextEntries = Object.fromEntries(
+        commits.map((commit) => [
+          commit.sha,
+          {
+            githubUsername: commit.author?.login ?? null,
+            htmlUrl: commit.html_url ?? null,
+            committedAt: commit.commit.author?.date ?? null,
+          } satisfies GitHubCommitCacheEntry,
+        ]),
+      );
+      writeFileSync(cachePath(repoPath), JSON.stringify(nextEntries));
+    });
+}
+
+export function readGithubCommitCache(repoPath: string): Record<string, GitHubCommitCacheEntry> {
+  try {
+    return JSON.parse(readFileSync(cachePath(repoPath), "utf8")) as Record<string, GitHubCommitCacheEntry>;
+  } catch {
+    return {};
+  }
+}
+
+export async function syncGithubMirror(config: GitHubMirrorConfig): Promise<string> {
+  mkdirSync(GITHUB_MIRRORS_ROOT, { recursive: true });
+  const mirrorPath = mirrorPathForGroup(config.groupId);
+
+  if (config.repoPath && config.repoPath !== mirrorPath && existsSync(config.repoPath)) {
+    rmSync(config.repoPath, { recursive: true, force: true });
+  }
+
+  if (!existsSync(mirrorPath)) {
+    runGit(["clone", "--mirror", config.githubRepoUrl, mirrorPath]);
+  } else {
+    const originUrl = runGit(["--git-dir", mirrorPath, "config", "--get", "remote.origin.url"]);
+    if (originUrl !== config.githubRepoUrl) {
+      rmSync(mirrorPath, { recursive: true, force: true });
+      runGit(["clone", "--mirror", config.githubRepoUrl, mirrorPath]);
+    } else {
+      runGit(["--git-dir", mirrorPath, "fetch", "--prune", "origin"]);
+    }
+  }
+
+  await refreshGithubCommitCache(config, mirrorPath);
+  return mirrorPath;
+}
+
+export async function syncGroupGithubMirror(groupId: string) {
   const group = db.select().from(groups).where(eq(groups.id, groupId)).get();
   if (!group) throw new Error("Group not found");
-  if (group.repositoryProvider !== "github" || !group.githubOwner || !group.githubRepo) {
+  if (group.repositoryProvider !== "github" || !group.githubRepoUrl || !group.githubOwner || !group.githubRepo) {
     throw new Error("Group is not connected to a GitHub repository");
   }
 
-  const members = db
-    .select({ userId: users.id, displayName: users.displayName, email: users.email, githubUsername: groupMembers.githubUsername })
-    .from(groupMembers)
-    .innerJoin(users, eq(groupMembers.userId, users.id))
-    .where(eq(groupMembers.groupId, groupId))
-    .all();
+  const repoPath = await syncGithubMirror({
+    groupId: group.id,
+    githubRepoUrl: group.githubRepoUrl,
+    githubOwner: group.githubOwner,
+    githubRepo: group.githubRepo,
+    repoPath: group.repoPath,
+  });
 
-  const commits = await githubFetch<GitHubCommitListItem[]>(`/repos/${group.githubOwner}/${group.githubRepo}/commits?per_page=50`);
-  const detailed = await Promise.all(
-    commits.map(async (commit) => {
-      const detail = await githubFetch<GitHubCommitDetail>(`/repos/${group.githubOwner}/${group.githubRepo}/commits/${commit.sha}`);
-      const githubUsername = commit.author?.login ?? null;
-      const matchedStudent = githubUsername
-        ? members.find((member) => member.githubUsername?.toLowerCase() === githubUsername.toLowerCase()) ?? null
-        : null;
+  return db.update(groups).set({ repoPath, cloneUrl: group.githubRepoUrl }).where(eq(groups.id, group.id)).returning().get();
+}
 
-      return {
-        hash: commit.sha,
-        htmlUrl: commit.html_url,
-        message: commit.commit.message,
-        authorName: commit.commit.author?.name ?? githubUsername ?? "Unknown",
-        githubUsername,
-        matchedStudent,
-        committedAt: commit.commit.author?.date ?? null,
-        additions: detail.stats?.additions ?? 0,
-        deletions: detail.stats?.deletions ?? 0,
-        changedFiles: detail.files?.length ?? 0,
-      };
-    }),
-  );
+export async function getGroupGithubActivity(groupId: string) {
+  const group = db.select().from(groups).where(eq(groups.id, groupId)).get();
+  if (!group) throw new Error("Group not found");
+  if (group.repositoryProvider !== "github" || !group.githubRepoUrl || !group.githubOwner || !group.githubRepo) {
+    throw new Error("Group is not connected to a GitHub repository");
+  }
+  if (!group.repoPath) throw new Error("GitHub mirror is not initialized");
 
-  return { group, members, commits: detailed };
+  const members = listDashboardMembers(groupId);
+  const commitCache = readGithubCommitCache(group.repoPath);
+
+  const commits = getGroupCommitActivity(group).map((commit) => {
+    const cached = commitCache[commit.hash];
+    const githubUsername = cached?.githubUsername ?? null;
+    const matchedMember = githubUsername
+      ? members.find((member) => (member.userGithubUsername ?? member.groupGithubUsername)?.toLowerCase() === githubUsername.toLowerCase()) ?? null
+      : null;
+
+    return {
+      hash: commit.hash,
+      htmlUrl: cached?.htmlUrl ?? null,
+      message: commit.message,
+      authorName: commit.authorName,
+      githubUsername,
+      matchedStudent: matchedMember
+        ? {
+            userId: matchedMember.userId,
+            username: matchedMember.username,
+            displayName: matchedMember.displayName,
+            email: matchedMember.email,
+            githubUsername: matchedMember.userGithubUsername ?? matchedMember.groupGithubUsername,
+          }
+        : null,
+      committedAt: cached?.committedAt ?? commit.committedAt,
+      additions: commit.additions,
+      deletions: commit.deletions,
+      changedFiles: commit.changedFiles,
+    };
+  });
+
+  return { group, members, commits };
 }

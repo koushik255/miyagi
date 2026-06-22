@@ -2,7 +2,7 @@
   "name": "my-app",
   "scripts": {
     "dev": "bun run --hot src/index.ts",
-    "dev:tunnel": "GIT_HTTP_BASE_URL=https://miyagi.koushikkoushik.com/git bun run --hot src/index.ts"
+    "test": "DB_PATH=./test.sqlite bun test src/backend.test.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",

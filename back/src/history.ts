@@ -1,30 +1,86 @@
 import { eq } from "drizzle-orm";
 import { db } from "./db";
+import { runGitDir } from "./git-command";
 import { pushedCommits } from "./schema";
 import type { Group } from "./group";
 
-const decoder = new TextDecoder();
+const COMMIT_SEPARATOR = "\u001e";
+const FIELD_SEPARATOR = "\u001f";
 
 export type GroupDiff =
   | { mode: "commit"; commit: string; patch: string }
   | { mode: "range"; base: string; head: string; patch: string }
   | { mode: "working-tree"; patch: string };
 
-export function getGroupHistory(group: Group) {
+export type GitCommitActivity = {
+  hash: string;
+  authorName: string;
+  authorEmail: string;
+  committedAt: string;
+  message: string;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+};
+
+export function getGroupCommitActivity(group: Group): GitCommitActivity[] {
   if (!group.repoPath) return [];
 
-  const result = Bun.spawnSync(
-    ["git", "--git-dir", group.repoPath, "log", "--all", "--max-count=25", "--pretty=format:%H%x09%an%x09%ar%x09%s"],
-    { stdout: "pipe", stderr: "pipe" },
-  );
+  const text = runGitDir(group.repoPath, [
+    "log",
+    "HEAD",
+    "--no-merges",
+    "--date=iso-strict",
+    `--pretty=format:%H${FIELD_SEPARATOR}%an${FIELD_SEPARATOR}%ae${FIELD_SEPARATOR}%aI${FIELD_SEPARATOR}%s${COMMIT_SEPARATOR}`,
+    "--numstat",
+  ]);
+  if (!text.trim()) return [];
 
-  if (!result.success) throw new Error(decoder.decode(result.stderr).trim());
+  return text
+    .split(COMMIT_SEPARATOR)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block) => {
+      const lines = block.split("\n").filter(Boolean);
+      const [hash, authorName, authorEmail, committedAt, ...messageParts] = (lines.shift() ?? "").split(FIELD_SEPARATOR);
+      let additions = 0;
+      let deletions = 0;
+      let changedFiles = 0;
 
+      for (const line of lines) {
+        const [added, removed] = line.split("\t");
+        if (!added || !removed) continue;
+        changedFiles += 1;
+        if (added !== "-") additions += Number(added) || 0;
+        if (removed !== "-") deletions += Number(removed) || 0;
+      }
+
+      return {
+        hash,
+        authorName,
+        authorEmail,
+        committedAt,
+        message: messageParts.join(FIELD_SEPARATOR),
+        additions,
+        deletions,
+        changedFiles,
+      };
+    });
+}
+
+export function getGroupHistory(group: Group) {
   const pushRows = db.select().from(pushedCommits).where(eq(pushedCommits.groupId, group.id)).all();
   const pushedByByHash = new Map(pushRows.map((push) => [push.hash, push.pushedByUsername]));
-  const text = decoder.decode(result.stdout).trim();
 
-  return text ? text.split("\n").map((line) => parseHistoryLine(line, pushedByByHash)) : [];
+  return getGroupCommitActivity(group)
+    .slice(0, 25)
+    .map((commit) => ({
+      hash: commit.hash,
+      author: commit.authorName,
+      pushedBy: pushedByByHash.get(commit.hash) ?? null,
+      when: commit.committedAt,
+      message: commit.message,
+    }));
 }
 
 export function getGroupDiff(group: Group, options: { base?: string; commit?: string; head?: string }): GroupDiff {
@@ -42,7 +98,7 @@ export function getGroupDiff(group: Group, options: { base?: string; commit?: st
     return {
       mode: "commit",
       commit,
-      patch: runGit(group.repoPath, ["show", "--format=", "--find-renames", "--patch", commit, "--"]),
+      patch: runGitDir(group.repoPath, ["show", "--format=", "--find-renames", "--patch", commit, "--"]),
     };
   }
 
@@ -53,7 +109,7 @@ export function getGroupDiff(group: Group, options: { base?: string; commit?: st
       mode: "range",
       base,
       head,
-      patch: runGit(group.repoPath, ["diff", "--find-renames", "--patch", `${base}..${head}`, "--"]),
+      patch: runGitDir(group.repoPath, ["diff", "--find-renames", "--patch", `${base}..${head}`, "--"]),
     };
   }
 
@@ -61,25 +117,12 @@ export function getGroupDiff(group: Group, options: { base?: string; commit?: st
 
   return {
     mode: "working-tree",
-    patch: runGit(group.repoPath, ["--work-tree", group.workspacePath, "diff", "--find-renames", "--patch", "HEAD", "--"]),
+    patch: runGitDir(group.repoPath, ["--work-tree", group.workspacePath, "diff", "--find-renames", "--patch", "HEAD", "--"]),
   };
 }
 
-function parseHistoryLine(line: string, pushedByByHash: Map<string, string>) {
-  const [hash, author, when, ...message] = line.split("\t");
-  return { hash, author, pushedBy: pushedByByHash.get(hash) ?? null, when, message: message.join("\t") };
-}
-
 function verifyCommit(repoPath: string, revision: string): void {
-  runGit(repoPath, ["rev-parse", "--verify", "--quiet", `${revision}^{commit}`]);
-}
-
-function runGit(repoPath: string, args: string[]): string {
-  const result = Bun.spawnSync(["git", "--git-dir", repoPath, ...args], { stdout: "pipe", stderr: "pipe" });
-  if (result.success) return decoder.decode(result.stdout);
-
-  const stderr = decoder.decode(result.stderr).trim();
-  throw new Error(stderr || `git ${args.join(" ")} failed`);
+  runGitDir(repoPath, ["rev-parse", "--verify", "--quiet", `${revision}^{commit}`]);
 }
 
 function normalizeRevision(value: string | undefined, name: string): string | undefined {

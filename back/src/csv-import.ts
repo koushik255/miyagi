@@ -1,57 +1,23 @@
-import { eq } from "drizzle-orm";
-import { Assignment } from "./assignment";
 import { Course } from "./course";
-import { db } from "./db";
+import { parseCsv } from "./csv";
+import { badRequest, notFound } from "./errors";
 import { Group } from "./group";
-import { courses } from "./schema";
+import { requireAssignmentOwnedByProfessor, requireCourseOwnedByProfessor } from "./guards";
 import { User } from "./user";
 
-export function parseCsv(csv: string): Record<string, string>[] {
-  const rows: string[][] = [];
-  let field = "";
-  let row: string[] = [];
-  let inQuotes = false;
-
-  for (let i = 0; i < csv.length; i++) {
-    const char = csv[i];
-    const next = csv[i + 1];
-    if (char === '"' && inQuotes && next === '"') {
-      field += '"';
-      i++;
-    } else if (char === '"') {
-      inQuotes = !inQuotes;
-    } else if (char === "," && !inQuotes) {
-      row.push(field.trim());
-      field = "";
-    } else if ((char === "\n" || char === "\r") && !inQuotes) {
-      if (char === "\r" && next === "\n") i++;
-      row.push(field.trim());
-      field = "";
-      if (row.some(Boolean)) rows.push(row);
-      row = [];
-    } else {
-      field += char;
-    }
-  }
-  row.push(field.trim());
-  if (row.some(Boolean)) rows.push(row);
-
-  const headers = rows.shift()?.map((header) => header.trim().toLowerCase()) ?? [];
-  return rows.map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index]?.trim() ?? ""])));
-}
-
 export function importCourseStudents(input: { professorId: string; courseId: string; csv: string }) {
-  const course = db.select().from(courses).where(eq(courses.id, input.courseId)).get();
-  if (!course) throw new Error("Course not found");
-  if (course.professorId !== input.professorId) throw new Error("Course does not belong to professor");
+  requireCourseOwnedByProfessor(input.courseId, input.professorId);
 
   const rows = parseCsv(input.csv);
   const students = rows.map((row) => {
-    const email = row.email;
-    const name = row.name || row.display_name || email;
+    const name = row.name || row.display_name || "";
+    const username = row.username || row.user || row.login || undefined;
+    const email = row.email || undefined;
+    const password = row.password || username || undefined;
     const studentId = row.student_id || row.studentid || row.id || undefined;
-    if (!email) throw new Error("Student CSV requires an email column");
-    const user = User.createOrUpdateStudent({ studentId, name, email });
+    if (!name) badRequest("Student CSV requires a name column");
+    if (!username && !email) badRequest("Student CSV requires a username or email column");
+    const user = User.createOrUpdateStudent({ studentId, name, email, username, password });
     Course.assignStudentByCourseId(input.courseId, user.id);
     return user;
   });
@@ -60,18 +26,16 @@ export function importCourseStudents(input: { professorId: string; courseId: str
 }
 
 export function importAssignmentGroups(input: { professorId: string; assignmentId: string; csv: string }) {
-  const assignment = Assignment.findById(input.assignmentId);
-  if (!assignment) throw new Error("Assignment not found");
-  if (assignment.professorId !== input.professorId) throw new Error("Assignment does not belong to professor");
+  const assignment = requireAssignmentOwnedByProfessor(input.assignmentId, input.professorId);
 
   const rows = parseCsv(input.csv);
   const importedGroups = rows.map((row) => {
     const groupName = row.group || row.name;
     const members = row.members;
     const githubUrl = row.github_url || row.github || row.repo || row.repository;
-    if (!groupName) throw new Error("Group CSV requires a group column");
-    if (!members) throw new Error("Group CSV requires a members column");
-    if (assignment.repositoryMode === "github" && !githubUrl) throw new Error(`GitHub assignment group ${groupName} requires github_url`);
+    if (!groupName) badRequest("Group CSV requires a group column");
+    if (!members) badRequest("Group CSV requires a members column");
+    if (assignment.repositoryMode === "github" && !githubUrl) badRequest(`GitHub assignment group ${groupName} requires github_url`);
 
     const group = Group.findOrCreateForAssignment({
       professorId: input.professorId,
@@ -82,9 +46,9 @@ export function importAssignmentGroups(input: { professorId: string; assignmentI
 
     const importedMembers = members.split(",").map((member) => {
       const [rawEmail, rawGithub] = member.split(":").map((part) => part.trim());
-      if (!rawEmail) throw new Error(`Invalid member entry in ${groupName}`);
+      if (!rawEmail) badRequest(`Invalid member entry in ${groupName}`);
       const user = User.findByEmailOrStudentId(rawEmail);
-      if (!user) throw new Error(`Student not found for ${rawEmail}`);
+      if (!user) notFound(`Student not found for ${rawEmail}`);
       Course.assignStudentByCourseId(assignment.courseId, user.id);
       return Group.assignCourseStudent(group.id, user.id, input.professorId, rawGithub || undefined);
     });
@@ -94,3 +58,5 @@ export function importAssignmentGroups(input: { professorId: string; assignmentI
 
   return { importedGroups: importedGroups.length, groups: importedGroups };
 }
+
+export { parseCsv };

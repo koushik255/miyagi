@@ -1,16 +1,14 @@
 import { and, eq } from "drizzle-orm";
-import { Course } from "./course";
 import { db, nowIso } from "./db";
+import { requireCourseOwnedByProfessor } from "./guards";
 import { assignments } from "./schema";
 
 export type Assignment = typeof assignments.$inferSelect;
 export type NewAssignment = typeof assignments.$inferInsert;
 
 export const Assignment = {
-  create(input: { professorId: string; courseId: string; name: string; description?: string; dueDate?: string; repositoryMode?: "local" | "github" }): Assignment {
-    const course = Course.findById(input.courseId);
-    if (!course) throw new Error("Course not found");
-    if (course.professorId !== input.professorId) throw new Error("Course does not belong to professor");
+  create(input: { professorId: string; courseId: string; name: string; description?: string; dueDate?: string; repositoryMode?: "github" }): Assignment {
+    requireCourseOwnedByProfessor(input.courseId, input.professorId);
 
     const timestamp = nowIso();
     const assignment: NewAssignment = {
@@ -20,7 +18,7 @@ export const Assignment = {
       description: input.description ?? "",
       dueDate: input.dueDate || null,
       professorId: input.professorId,
-      repositoryMode: input.repositoryMode ?? "local",
+      repositoryMode: input.repositoryMode ?? "github",
       createdAt: timestamp,
       updatedAt: timestamp,
     };

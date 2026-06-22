@@ -7,6 +7,7 @@ export const users = sqliteTable("users", {
   displayName: text("display_name").notNull(),
   email: text("email").unique(),
   studentId: text("student_id").unique(),
+  githubUsername: text("github_username"),
   password: text("password"),
   createdAt: text("created_at").notNull(),
   lastSeenAt: text("last_seen_at").notNull(),
@@ -58,7 +59,24 @@ export const assignments = sqliteTable("assignments", {
   professorId: text("professor_id")
     .notNull()
     .references(() => professors.id, { onDelete: "cascade" }),
-  repositoryMode: text("repository_mode").notNull().default("local"),
+  repositoryMode: text("repository_mode").notNull().default("github"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const courseCalendarItems = sqliteTable("course_calendar_items", {
+  id: text("id").primaryKey(),
+  courseId: text("course_id")
+    .notNull()
+    .references(() => courses.id, { onDelete: "cascade" }),
+  professorId: text("professor_id")
+    .notNull()
+    .references(() => professors.id, { onDelete: "cascade" }),
+  assignmentId: text("assignment_id").references(() => assignments.id, { onDelete: "set null" }),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  dueAt: text("due_at").notNull(),
+  kind: text("kind", { enum: ["event", "deadline"] }).notNull(),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
@@ -72,7 +90,7 @@ export const groups = sqliteTable("groups", {
   workspacePath: text("workspace_path"),
   repoPath: text("repo_path"),
   cloneUrl: text("clone_url"),
-  repositoryProvider: text("repository_provider").notNull().default("local"),
+  repositoryProvider: text("repository_provider").notNull().default("github"),
   githubRepoUrl: text("github_repo_url"),
   githubOwner: text("github_owner"),
   githubRepo: text("github_repo"),
