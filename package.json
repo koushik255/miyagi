@@ -4,13 +4,12 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node scripts/dev.mjs",
+    "dev": "vite --host 127.0.0.1",
     "dev:dual": "node scripts/dev-dual.mjs",
-    "dev:web": "vite",
+    "dev:tunnel": "npm run build && cd back && bun run dev",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview",
-    "start": "electron ."
+    "preview": "vite preview"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
@@ -28,20 +27,12 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
-    "concurrently": "^9.2.1",
-    "cross-env": "^10.1.0",
-    "electron": "^42.4.1",
     "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.5.0",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.2",
-    "vite": "^8.0.10",
-    "wait-on": "^9.0.5"
-  },
-  "main": "electron/main.cjs",
-  "allowScripts": {
-    "electron@42.0.0": true
+    "vite": "^8.0.10"
   }
 }

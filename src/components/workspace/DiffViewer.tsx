@@ -71,7 +71,7 @@ export function DiffViewer({
                   key={`${fileDiff.prevName ?? fileDiff.name}-${index}`}
                   options={{
                     diffStyle: 'split',
-                    theme: 'pierre-dark',
+                    theme: 'pierre-light',
                   }}
                 />
               ))}

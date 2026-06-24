@@ -8,6 +8,7 @@ export const users = sqliteTable("users", {
   email: text("email").unique(),
   studentId: text("student_id").unique(),
   githubUsername: text("github_username"),
+  avatarColor: text("avatar_color"),
   password: text("password"),
   createdAt: text("created_at").notNull(),
   lastSeenAt: text("last_seen_at").notNull(),
@@ -19,7 +20,22 @@ export const professors = sqliteTable("professors", {
     .notNull()
     .unique()
     .references(() => users.id, { onDelete: "cascade" }),
+  pageSlug: text("page_slug").notNull().unique(),
+  pageTitle: text("page_title").notNull(),
   createdAt: text("created_at").notNull(),
+});
+
+export const professorGithubAccounts = sqliteTable("professor_github_accounts", {
+  professorId: text("professor_id")
+    .primaryKey()
+    .references(() => professors.id, { onDelete: "cascade" }),
+  githubUserId: text("github_user_id").notNull().unique(),
+  githubUsername: text("github_username").notNull(),
+  accessToken: text("access_token").notNull(),
+  tokenType: text("token_type"),
+  scope: text("scope"),
+  connectedAt: text("connected_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
 });
 
 export const courses = sqliteTable("courses", {
@@ -112,6 +128,7 @@ export const groupMembers = sqliteTable(
       .references(() => groups.id, { onDelete: "cascade" }),
     role: text("role").notNull().default("student"),
     githubUsername: text("github_username"),
+    movedFromGroupId: text("moved_from_group_id"),
     joinedAt: text("joined_at").notNull(),
   },
   (table) => [uniqueIndex("group_members_user_group_unique").on(table.userId, table.groupId)],

@@ -1,12 +1,71 @@
-import { eq, notInArray, or } from "drizzle-orm";
+import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
+import { eq, notInArray, or, sql } from "drizzle-orm";
 import { db, nowIso } from "./db";
-import { badRequest } from "./errors";
+import { badRequest, conflict, unauthorized } from "./errors";
 import { professors, users } from "./schema";
+
+const PASSWORD_PREFIX = "pbkdf2";
+const PASSWORD_ITERATIONS = 210_000;
+const PASSWORD_KEY_LENGTH = 32;
+const PASSWORD_DIGEST = "sha256";
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
+export type PublicUser = Omit<User, "password">;
+const STUDENT_AVATAR_COLORS = ["#3b82f6", "#ef4444", "#facc15", "#f97316", "#22c55e", "#ec4899"] as const;
+const AVATAR_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
+
+function defaultAvatarColor(seed: string): string {
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) hash = (hash * 31 + seed.charCodeAt(index)) >>> 0;
+  return STUDENT_AVATAR_COLORS[hash % STUDENT_AVATAR_COLORS.length];
+}
+
+function normalizeAvatarColor(value: string | null | undefined): string | null | undefined {
+  if (value === undefined) return undefined;
+  const color = value.trim();
+  if (!color) return null;
+  if (!AVATAR_COLOR_PATTERN.test(color)) badRequest("Avatar color must be a hex color");
+  return color.toLowerCase();
+}
+
+function normalizeUsername(username: string): string {
+  return username.trim().toLowerCase();
+}
+
+function requirePassword(password: string) {
+  if (password.length < 8) badRequest("Password must be at least 8 characters");
+}
+
+function hashPassword(password: string): string {
+  const salt = randomBytes(16).toString("hex");
+  const hash = pbkdf2Sync(password, salt, PASSWORD_ITERATIONS, PASSWORD_KEY_LENGTH, PASSWORD_DIGEST).toString("hex");
+  return `${PASSWORD_PREFIX}$${PASSWORD_ITERATIONS}$${salt}$${hash}`;
+}
+
+function verifyPassword(storedPassword: string | null, password: string): boolean {
+  if (!storedPassword) return false;
+  if (!storedPassword.startsWith(`${PASSWORD_PREFIX}$`)) return storedPassword === password;
+
+  const [, iterationsValue, salt, hash] = storedPassword.split("$");
+  const iterations = Number(iterationsValue);
+  if (!iterations || !salt || !hash) return false;
+
+  const expected = Buffer.from(hash, "hex");
+  const actual = pbkdf2Sync(password, salt, iterations, expected.length, PASSWORD_DIGEST);
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
+
+function isHashedPassword(password: string | null): boolean {
+  return Boolean(password?.startsWith(`${PASSWORD_PREFIX}$`));
+}
 
 export const User = {
+  toPublicUser(user: User): PublicUser {
+    const { password: _password, ...publicUser } = user;
+    return publicUser;
+  },
+
   createAnonymousUser(
     deviceHash: string,
     displayName = "Anonymous",
@@ -23,7 +82,8 @@ export const User = {
       email: email ?? null,
       studentId: studentId ?? null,
       githubUsername: githubUsername ?? null,
-      password: password ?? null,
+      avatarColor: defaultAvatarColor(deviceHash),
+      password: password ? hashPassword(password) : null,
       createdAt: timestamp,
       lastSeenAt: timestamp,
     };
@@ -32,19 +92,29 @@ export const User = {
   },
 
   createOrGet(deviceHash: string, displayName = "Anonymous", password?: string): User {
-    const existing = this.findByDeviceHash(deviceHash);
-    if (existing) {
-      if (password && existing.password !== password) this.setPassword(existing.id, password);
-      return this.updatePresence(existing.id);
-    }
+    const username = normalizeUsername(deviceHash);
+    const existing = this.findByDeviceHash(username);
+    if (existing) return this.updatePresence(existing.id);
 
-    return this.createAnonymousUser(deviceHash, displayName, password);
+    return this.createAnonymousUser(username, displayName, password);
   },
 
-  createOrUpdateStudent(input: { studentId?: string; name: string; email?: string; username?: string; password?: string }): User {
+  createAccount(input: { username: string; password: string; displayName?: string; email?: string }): User {
+    const username = normalizeUsername(input.username);
+    if (!username) badRequest("Username is required");
+    requirePassword(input.password);
+    if (this.findByDeviceHash(username)) conflict("An account already exists for that username");
+
+    const email = input.email?.trim().toLowerCase() || (username.includes("@") ? username : undefined);
+    if (email && this.findByEmail(email)) conflict("An account already exists for that email");
+
+    return this.createAnonymousUser(username, input.displayName?.trim() || username, input.password, email);
+  },
+
+  createOrUpdateStudent(input: { studentId?: string; name: string; email?: string; username?: string; password?: string; temporaryPassword?: string }): User {
     const username = input.username?.trim() || undefined;
     const email = input.email?.trim() || (username ? `${username}@example.edu` : undefined);
-    const password = username ?? email;
+    const password = input.password?.trim() || input.temporaryPassword?.trim() || username || email;
     if (!username && !email) badRequest("Student requires a username or email");
     const deviceHash = username ?? email!;
     const existing = this.findByDeviceHash(deviceHash)
@@ -59,7 +129,7 @@ export const User = {
           email: email ?? existing.email,
           studentId: input.studentId ?? existing.studentId,
           githubUsername: existing.githubUsername,
-          password: password ?? existing.password,
+          password: input.password ? hashPassword(input.password) : existing.password,
           lastSeenAt: nowIso(),
         })
         .where(eq(users.id, existing.id))
@@ -71,21 +141,41 @@ export const User = {
   },
 
   login(deviceHash: string, password: string): User | undefined {
-    const user = this.findByDeviceHash(deviceHash);
-    if (!user || user.password !== password) return undefined;
+    const user = this.findByDeviceHash(normalizeUsername(deviceHash));
+    if (!user || !verifyPassword(user.password, password)) return undefined;
+    if (!isHashedPassword(user.password)) this.setPassword(user.id, password);
     return this.updatePresence(user.id);
   },
 
   setPassword(id: string, password: string): User {
-    return db.update(users).set({ password }).where(eq(users.id, id)).returning().get();
+    return db.update(users).set({ password: hashPassword(password) }).where(eq(users.id, id)).returning().get();
+  },
+
+  updatePassword(id: string, currentPassword: string, nextPassword: string): User {
+    requirePassword(nextPassword);
+    const user = this.findById(id);
+    if (!user) badRequest("User not found");
+    if (!verifyPassword(user.password, currentPassword)) unauthorized("Current password is incorrect");
+    return this.setPassword(id, nextPassword);
+  },
+
+  updateAccount(id: string, input: { displayName?: string; githubUsername?: string; avatarColor?: string | null }): User {
+    const displayName = input.displayName?.trim();
+    if (input.displayName !== undefined && !displayName) badRequest("Display name is required");
+    const update: Partial<Pick<User, "displayName" | "githubUsername" | "avatarColor" | "lastSeenAt">> = { lastSeenAt: nowIso() };
+    if (displayName) update.displayName = displayName;
+    if (input.githubUsername !== undefined) update.githubUsername = input.githubUsername.trim() || null;
+    const avatarColor = normalizeAvatarColor(input.avatarColor);
+    if (avatarColor !== undefined) update.avatarColor = avatarColor;
+    return db.update(users).set(update).where(eq(users.id, id)).returning().get();
   },
 
   setGithubUsername(id: string, githubUsername?: string): User {
-    return db.update(users).set({ githubUsername: githubUsername?.trim() || null }).where(eq(users.id, id)).returning().get();
+    return this.updateAccount(id, { githubUsername });
   },
 
   findByDeviceHash(deviceHash: string): User | undefined {
-    return db.select().from(users).where(eq(users.deviceHash, deviceHash)).get();
+    return db.select().from(users).where(sql`lower(${users.deviceHash}) = ${normalizeUsername(deviceHash)}`).get();
   },
 
   findByEmail(email: string): User | undefined {
@@ -97,7 +187,8 @@ export const User = {
   },
 
   findByEmailOrStudentId(value: string): User | undefined {
-    return db.select().from(users).where(or(eq(users.email, value), eq(users.studentId, value))).get();
+    const normalized = normalizeUsername(value);
+    return db.select().from(users).where(or(eq(users.email, normalized), eq(users.studentId, value), sql`lower(${users.deviceHash}) = ${normalized}`)).get();
   },
 
   findById(id: string): User | undefined {

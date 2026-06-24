@@ -31,7 +31,7 @@ export function getGroupCommitActivity(group: Group): GitCommitActivity[] {
     "HEAD",
     "--no-merges",
     "--date=iso-strict",
-    `--pretty=format:%H${FIELD_SEPARATOR}%an${FIELD_SEPARATOR}%ae${FIELD_SEPARATOR}%aI${FIELD_SEPARATOR}%s${COMMIT_SEPARATOR}`,
+    `--pretty=format:${COMMIT_SEPARATOR}%H${FIELD_SEPARATOR}%an${FIELD_SEPARATOR}%ae${FIELD_SEPARATOR}%aI${FIELD_SEPARATOR}%s`,
     "--numstat",
   ]);
   if (!text.trim()) return [];

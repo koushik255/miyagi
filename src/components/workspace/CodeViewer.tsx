@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { Check, Copy, FileCode, FileText } from 'lucide-react'
 import { detectLanguage, highlight } from '../../highlight'
 import type { WorkspaceFile } from '../../types'
+import { Button } from '../ui'
 
 export function CodeViewer({ file, content, loading }: { file: WorkspaceFile | null; content: string; loading: boolean }) {
   const lang = file ? detectLanguage(file.name) : 'plaintext'
@@ -81,9 +82,9 @@ function CopyButton({ text, disabled }: { text: string; disabled?: boolean }) {
     }
   }
   return (
-    <button className={`copy-btn ${copied ? 'copied' : ''}`} onClick={copy} disabled={disabled} title="Copy contents">
+    <Button className={`copy-btn ${copied ? 'copied' : ''}`} variant="ghost" size="sm" onClick={copy} disabled={disabled} title="Copy contents">
       {copied ? <Check size={11} /> : <Copy size={11} />}
       {copied ? 'Copied' : 'Copy'}
-    </button>
+    </Button>
   )
 }

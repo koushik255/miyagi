@@ -15,7 +15,6 @@ const backDir = shellQuote(resolve(root, 'back'))
 const commands = [
   `cd ${backDir} && bun run dev`,
   `cd ${rootDir} && npm run dev`,
-  `cd ${rootDir} && ./node_modules/.bin/wait-on http://127.0.0.1:5173 && VITE_DEV_SERVER_URL=http://127.0.0.1:5173 ./node_modules/.bin/electron .`,
 ]
 
 if (dryRun) {

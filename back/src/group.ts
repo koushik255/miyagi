@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db, nowIso } from "./db";
 import { notFound } from "./errors";
 import { parseGithubRepoUrl } from "./github-url";
@@ -65,21 +65,43 @@ export const Group = {
     if (!group.courseId) throw new Error("Group is not attached to a course");
     requireCourseMember(userId, group.courseId);
 
+    const assignmentGroupIds = group.assignmentId
+      ? db.select({ id: groups.id }).from(groups).where(eq(groups.assignmentId, group.assignmentId)).all().map((entry) => entry.id)
+      : [group.id];
+    const previousGroupIds = assignmentGroupIds.filter((id) => id !== group.id);
+    const previousMemberships = previousGroupIds.length > 0
+      ? db
+          .select({ groupId: groupMembers.groupId })
+          .from(groupMembers)
+          .where(and(eq(groupMembers.userId, userId), inArray(groupMembers.groupId, previousGroupIds)))
+          .all()
+      : [];
+    const movedFromGroupId = previousMemberships[0]?.groupId ?? null;
+    if (previousGroupIds.length > 0) {
+      db.delete(groupMembers)
+        .where(and(eq(groupMembers.userId, userId), inArray(groupMembers.groupId, previousGroupIds)))
+        .run();
+    }
+
     const member: NewGroupMember = {
       id: crypto.randomUUID(),
       userId,
       groupId: group.id,
       role: "student",
       githubUsername: githubUsername ?? null,
+      movedFromGroupId,
       joinedAt: nowIso(),
     };
 
     const inserted = db.insert(groupMembers).values(member).onConflictDoNothing().returning().get();
     if (inserted) return inserted;
-    if (githubUsername) {
+    const update: Partial<NewGroupMember> = {};
+    if (githubUsername) update.githubUsername = githubUsername;
+    if (movedFromGroupId) update.movedFromGroupId = movedFromGroupId;
+    if (Object.keys(update).length > 0) {
       return db
         .update(groupMembers)
-        .set({ githubUsername })
+        .set(update)
         .where(and(eq(groupMembers.userId, userId), eq(groupMembers.groupId, group.id)))
         .returning()
         .get();
@@ -168,7 +190,6 @@ export const Group = {
         name: groups.name,
         courseId: groups.courseId,
         assignmentId: groups.assignmentId,
-        joinCode: groups.joinCode,
         workspacePath: groups.workspacePath,
         repoPath: groups.repoPath,
         cloneUrl: groups.cloneUrl,

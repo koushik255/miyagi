@@ -2,8 +2,10 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
+import { matchDashboardMemberForCommit } from "./dashboard-stats";
 import { db } from "./db";
 import { runGit } from "./git-command";
+import { Professor } from "./professor";
 import { listDashboardMembers } from "./group-member-read-model";
 import { getGroupCommitActivity } from "./history";
 import { groups } from "./schema";
@@ -21,6 +23,7 @@ type GitHubMirrorConfig = {
   githubOwner: string;
   githubRepo: string;
   repoPath?: string | null;
+  accessToken?: string | null;
 };
 
 type GitHubCommitCacheEntry = {
@@ -32,6 +35,7 @@ type GitHubCommitCacheEntry = {
 const GITHUB_MIRRORS_ROOT = process.env.GITHUB_MIRRORS_ROOT
   ?? join(process.env.MIYAGI_DATA_ROOT ?? defaultDataRoot(), "github_mirrors");
 const CACHE_FILE = "miyagi-github-cache.json";
+const FIXTURE_FILE = "miyagi-github-fixture.json";
 
 function defaultDataRoot() {
   if (process.platform === "darwin") return join(homedir(), "Library", "Application Support", "Miyagi");
@@ -39,12 +43,13 @@ function defaultDataRoot() {
   return join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "miyagi");
 }
 
-async function githubFetch<T>(path: string): Promise<T> {
+async function githubFetch<T>(path: string, accessToken?: string | null): Promise<T> {
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
   };
-  if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  const token = accessToken ?? process.env.GITHUB_TOKEN;
+  if (token) headers.Authorization = `Bearer ${token}`;
 
   const response = await fetch(`https://api.github.com${path}`, { headers });
   if (!response.ok) throw new Error(`GitHub API failed: ${response.status} ${await response.text()}`);
@@ -59,8 +64,16 @@ function cachePath(repoPath: string) {
   return join(repoPath, CACHE_FILE);
 }
 
+function fixturePath(repoPath: string) {
+  return join(repoPath, FIXTURE_FILE);
+}
+
+function isFixtureMirror(repoPath: string | null | undefined) {
+  return Boolean(repoPath && existsSync(fixturePath(repoPath)));
+}
+
 function refreshGithubCommitCache(config: GitHubMirrorConfig, repoPath: string) {
-  return githubFetch<GitHubCommitListItem[]>(`/repos/${config.githubOwner}/${config.githubRepo}/commits?per_page=100`)
+  return githubFetch<GitHubCommitListItem[]>(`/repos/${config.githubOwner}/${config.githubRepo}/commits?per_page=100`, config.accessToken)
     .then((commits) => {
       const nextEntries = Object.fromEntries(
         commits.map((commit) => [
@@ -84,23 +97,34 @@ export function readGithubCommitCache(repoPath: string): Record<string, GitHubCo
   }
 }
 
+
+function githubAuthArgs(accessToken?: string | null): string[] {
+  return accessToken ? ["-c", `http.extraHeader=Authorization: Bearer ${accessToken}`] : [];
+}
 export async function syncGithubMirror(config: GitHubMirrorConfig): Promise<string> {
   mkdirSync(GITHUB_MIRRORS_ROOT, { recursive: true });
   const mirrorPath = mirrorPathForGroup(config.groupId);
+
+  if (isFixtureMirror(config.repoPath)) {
+    return config.repoPath!;
+  }
 
   if (config.repoPath && config.repoPath !== mirrorPath && existsSync(config.repoPath)) {
     rmSync(config.repoPath, { recursive: true, force: true });
   }
 
+  const authArgs = githubAuthArgs(config.accessToken);
   if (!existsSync(mirrorPath)) {
-    runGit(["clone", "--mirror", config.githubRepoUrl, mirrorPath]);
+    runGit([...authArgs, "clone", "--mirror", config.githubRepoUrl, mirrorPath]);
+    runGit(["--git-dir", mirrorPath, "config", "remote.origin.url", config.githubRepoUrl]);
   } else {
     const originUrl = runGit(["--git-dir", mirrorPath, "config", "--get", "remote.origin.url"]);
     if (originUrl !== config.githubRepoUrl) {
       rmSync(mirrorPath, { recursive: true, force: true });
-      runGit(["clone", "--mirror", config.githubRepoUrl, mirrorPath]);
+      runGit([...authArgs, "clone", "--mirror", config.githubRepoUrl, mirrorPath]);
+      runGit(["--git-dir", mirrorPath, "config", "remote.origin.url", config.githubRepoUrl]);
     } else {
-      runGit(["--git-dir", mirrorPath, "fetch", "--prune", "origin"]);
+      runGit([...authArgs, "--git-dir", mirrorPath, "fetch", "--prune", "origin"]);
     }
   }
 
@@ -115,12 +139,15 @@ export async function syncGroupGithubMirror(groupId: string) {
     throw new Error("Group is not connected to a GitHub repository");
   }
 
+  const githubAccount = Professor.githubConnection(group.professorId);
+
   const repoPath = await syncGithubMirror({
     groupId: group.id,
     githubRepoUrl: group.githubRepoUrl,
     githubOwner: group.githubOwner,
     githubRepo: group.githubRepo,
     repoPath: group.repoPath,
+    accessToken: githubAccount?.accessToken ?? null,
   });
 
   return db.update(groups).set({ repoPath, cloneUrl: group.githubRepoUrl }).where(eq(groups.id, group.id)).returning().get();
@@ -140,9 +167,11 @@ export async function getGroupGithubActivity(groupId: string) {
   const commits = getGroupCommitActivity(group).map((commit) => {
     const cached = commitCache[commit.hash];
     const githubUsername = cached?.githubUsername ?? null;
-    const matchedMember = githubUsername
-      ? members.find((member) => (member.userGithubUsername ?? member.groupGithubUsername)?.toLowerCase() === githubUsername.toLowerCase()) ?? null
-      : null;
+    const matchedMember = matchDashboardMemberForCommit({
+      githubUsername,
+      authorName: commit.authorName,
+      authorEmail: commit.authorEmail,
+    }, members);
 
     return {
       hash: commit.hash,
@@ -156,6 +185,7 @@ export async function getGroupGithubActivity(groupId: string) {
             username: matchedMember.username,
             displayName: matchedMember.displayName,
             email: matchedMember.email,
+            avatarColor: matchedMember.avatarColor,
             githubUsername: matchedMember.userGithubUsername ?? matchedMember.groupGithubUsername,
           }
         : null,

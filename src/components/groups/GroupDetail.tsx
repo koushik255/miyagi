@@ -1,31 +1,24 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
-import { BookOpen, Users, GitCommit, ClipboardList, UserPlus, Copy, Check, BarChart3 } from 'lucide-react'
+import { BookOpen, Users, ClipboardList, UserPlus, Copy, Check, BarChart3 } from 'lucide-react'
+import { studentAvatarStyle } from '../../avatar'
 import { api } from '../../api'
 import { initials, relativeTime } from '../../format'
-import { DiffViewer } from '../workspace/DiffViewer'
-import type { Assignment, Course, Group, GroupDiff, HistoryEntry, Member, Role } from '../../types'
+import type { Assignment, Course, Group, Member, Role } from '../../types'
 import { PerformanceDashboard } from './PerformanceDashboard'
+import { Avatar, Badge, Button, DialogShell, Input, Tabs, TabsList, TabsTrigger } from '../ui'
 
 function showError(err: unknown, fallback = 'Something went wrong') {
   toast.error(err instanceof Error ? err.message : fallback)
 }
 
-type GroupDetailTab = 'dashboard' | 'history' | 'students' | 'group'
-function getRepositoryTabCopy(isGithubConnected: boolean) {
-  if (isGithubConnected) {
-    return {
-      historyEmptyTitle: 'No repository history yet',
-      historyEmptyDescription: 'Commits will appear here once this GitHub repository has activity.',
-      historySidebarEmpty: 'No repository history yet.',
-    }
-  }
-  return {
-    historyEmptyTitle: 'No commits yet',
-    historyEmptyDescription: 'Commits will appear here once team members push to the repository.',
-    historySidebarEmpty: 'No commits yet.',
-  }
+function studentDisplayLabel(student: Member) {
+  const emailLocalPart = student.email?.split('@')[0]?.trim()
+  return emailLocalPart || student.displayName
 }
+
+type GroupDetailTab = 'dashboard' | 'students' | 'group'
+
 
 export function GroupDetail({
   course,
@@ -44,10 +37,6 @@ export function GroupDetail({
   onSidebarContentChange?: (content: ReactNode | null) => void
   onGroupUpdated?: (group: Group) => void
 }) {
-  const [history, setHistory] = useState<HistoryEntry[] | null>(null)
-  const [activeHistoryEntry, setActiveHistoryEntry] = useState<HistoryEntry | null>(null)
-  const [diffPatch, setDiffPatch] = useState('')
-  const [loadingDiff, setLoadingDiff] = useState(false)
   const [members, setMembers] = useState<Member[]>([])
   const [courseMembers, setCourseMembers] = useState<Member[] | null>(null)
   const [tab, setTab] = useState<GroupDetailTab>('dashboard')
@@ -57,42 +46,11 @@ export function GroupDetail({
   const [connectingGithub, setConnectingGithub] = useState(false)
   const [dashboardRefreshKey, setDashboardRefreshKey] = useState(0)
   const isGithubConnected = Boolean(group.githubRepoUrl) || group.repositoryProvider === 'github'
-  const repositoryTabCopy = getRepositoryTabCopy(isGithubConnected)
 
   const refreshMembers = useCallback(() => {
     return api<Member[]>(`/groups/${group.id}/members`).then(setMembers).catch(() => setMembers([]))
   }, [group.id])
 
-
-
-  const openDiff = useCallback(async (entry: HistoryEntry) => {
-    setActiveHistoryEntry(entry)
-    setLoadingDiff(true)
-    try {
-      const result = await api<GroupDiff>(`/groups/${group.id}/diff?commit=${encodeURIComponent(entry.hash)}`)
-      setDiffPatch(result.patch)
-    } catch (err) {
-      showError(err, 'Could not read diff')
-      setDiffPatch('')
-    } finally {
-      setLoadingDiff(false)
-    }
-  }, [group.id])
-
-  const loadHistory = useCallback(async () => {
-    try {
-      const entries = await api<HistoryEntry[]>(`/groups/${group.id}/history`)
-      setHistory(entries)
-      if (entries.length > 0) {
-        void openDiff(entries[0])
-      } else {
-        setActiveHistoryEntry(null)
-        setDiffPatch('')
-      }
-    } catch {
-      setHistory([])
-    }
-  }, [group.id, openDiff])
 
   const fetchLatestRepository = useCallback(async (notify = true) => {
     if (!isGithubConnected) return
@@ -100,17 +58,15 @@ export function GroupDetail({
       const updatedGroup = await api<Group>(`/groups/${group.id}/github/fetch`, { method: 'POST' })
       onGroupUpdated?.(updatedGroup)
       setDashboardRefreshKey((value) => value + 1)
-      await loadHistory()
       if (notify) toast.success('Repository updated')
     } catch (err) {
       if (notify) showError(err, 'Could not fetch latest repository changes')
     }
-  }, [group.id, isGithubConnected, loadHistory, onGroupUpdated])
+  }, [group.id, isGithubConnected, onGroupUpdated])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setHistory(null); setCourseMembers(null); setActiveHistoryEntry(null); setDiffPatch(''); setLoadingDiff(false)
-    void loadHistory()
+    setCourseMembers(null)
     refreshMembers()
     if (role === 'professor') {
       api<Member[]>(`/courses/${course.id}/members`).then(setCourseMembers).catch(() => setCourseMembers([]))
@@ -118,31 +74,19 @@ export function GroupDetail({
     if (isGithubConnected) {
       void fetchLatestRepository(false)
     }
-  }, [course.id, fetchLatestRepository, group.id, isGithubConnected, loadHistory, refreshMembers, role])
+  }, [course.id, fetchLatestRepository, group.id, isGithubConnected, refreshMembers, role])
 
-  const lastCommit = history && history.length > 0 ? history[0] : null
   const assignedUserIds = useMemo(() => new Set(members.map((member) => member.userId)), [members])
   const availableStudents = useMemo(
     () => (courseMembers ?? []).filter((member) => !assignedUserIds.has(member.userId)),
     [assignedUserIds, courseMembers],
   )
 
-  const historySidebarContent = useMemo(() => {
-    if (tab !== 'history') return null
-    return (
-      <HistoryCommitList
-        entries={history}
-        emptyMessage={repositoryTabCopy.historySidebarEmpty}
-        selectedHash={activeHistoryEntry?.hash ?? null}
-        onSelect={openDiff}
-      />
-    )
-  }, [activeHistoryEntry?.hash, history, openDiff, repositoryTabCopy.historySidebarEmpty, tab])
-
   useEffect(() => {
-    onSidebarContentChange?.(historySidebarContent)
+    onSidebarContentChange?.(null)
     return () => onSidebarContentChange?.(null)
-  }, [historySidebarContent, onSidebarContentChange])
+  }, [onSidebarContentChange])
+
 
   useEffect(() => {
     setGithubDialogOpen(false)
@@ -181,7 +125,7 @@ export function GroupDetail({
         method: 'POST',
         body: JSON.stringify({ professorId, userId: student.userId }),
       })
-      toast.success(`${student.displayName} added to ${group.name}`)
+      toast.success(`${studentDisplayLabel(student)} added to ${group.name}`)
       await refreshMembers()
     } catch (err) {
       showError(err, 'Could not add student')
@@ -192,49 +136,39 @@ export function GroupDetail({
 
   return (
     <>
-      <div className="detail-header compact">
+      <div className="detail-header compact course-hero">
         <div className="detail-title-row">
           <div className="title-block">
-            <span className="course-tag" title={course.name}><BookOpen size={11} /> {course.name}</span>
-            <span className="course-tag" title={assignment.name}><ClipboardList size={11} /> {assignment.name}</span>
+            <Badge variant="accent" className="course-tag" title={course.name}><BookOpen size={11} /> {course.name}</Badge>
+            <Badge variant="muted" className="course-tag" title={assignment.name}><ClipboardList size={11} /> {assignment.name}</Badge>
             <h2>{group.name}</h2>
             <span className="meta-inline">
               <Users size={11} /> {members.length}
-              {lastCommit && (
-                <>
-                  <span className="dot-sep" />
-                  <GitCommit size={11} /> {relativeTime(lastCommit.when)}
-                </>
-              )}
             </span>
           </div>
           <div className="detail-actions">
-            <div className="tabs" aria-label="Group workspace tabs">
-              <button className={tab === 'dashboard' ? 'active' : ''} onClick={() => setTab('dashboard')}>
-                <BarChart3 size={13} /> Dashboard
-              </button>
-              {role === 'professor' && (
-                <button className={tab === 'students' ? 'active' : ''} onClick={() => setTab('students')}>
-                  <Users size={13} /> Students
-                </button>
-              )}
-              {role === 'student' && (
-                <button className={tab === 'group' ? 'active' : ''} onClick={() => setTab('group')}>
-                  <Users size={13} /> Students
-                  <span style={{ marginLeft: 4, fontSize: 11, color: 'var(--muted)' }}>{members.length}</span>
-                </button>
-              )}
-              <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}>
-                <GitCommit size={13} /> History
-                {history && history.length > 0 && (
-                  <span style={{ marginLeft: 4, fontSize: 11, color: 'var(--muted)' }}>{history.length}</span>
+            <Tabs aria-label="Group workspace tabs">
+              <TabsList>
+                <TabsTrigger active={tab === 'dashboard'} onClick={() => setTab('dashboard')}>
+                  <BarChart3 size={13} /> Dashboard
+                </TabsTrigger>
+                {role === 'professor' && (
+                  <TabsTrigger active={tab === 'students'} onClick={() => setTab('students')}>
+                    <Users size={13} /> Students
+                  </TabsTrigger>
                 )}
-              </button>
-            </div>
+                {role === 'student' && (
+                  <TabsTrigger active={tab === 'group'} onClick={() => setTab('group')}>
+                    <Users size={13} /> Students
+                    <span className="tab-count">{members.length}</span>
+                  </TabsTrigger>
+                )}
+              </TabsList>
+            </Tabs>
             {role === 'professor' && (
-              <button className={`btn btn-sm ${group.githubRepoUrl ? 'btn-success' : ''}`} onClick={() => setGithubDialogOpen(true)}>
+              <Button variant={group.githubRepoUrl ? 'success' : 'secondary'} size="sm" onClick={() => setGithubDialogOpen(true)}>
                 {group.githubRepoUrl ? 'GitHub Connected' : 'Connect GitHub'}
-              </button>
+              </Button>
             )}
             {group.cloneUrl && <CloneUrlButton url={group.cloneUrl} />}
           </div>
@@ -250,14 +184,7 @@ export function GroupDetail({
               refreshKey={dashboardRefreshKey}
               showFetchLatest={isGithubConnected}
               onFetchLatest={() => fetchLatestRepository(true)}
-              canInspectStudents={role === 'professor'}
-            />
-          ) : tab === 'history' ? (
-            <HistoryView
-              entries={history}
-              emptyTitle={repositoryTabCopy.historyEmptyTitle}
-              emptyDescription={repositoryTabCopy.historyEmptyDescription}
-              diff={<DiffViewer entry={activeHistoryEntry} loading={loadingDiff} patch={diffPatch} />}
+              canInspectStudents
             />
           ) : tab === 'group' ? (
             <GroupMembersView groupMembers={members} />
@@ -273,39 +200,32 @@ export function GroupDetail({
         </div>
       </div>
       {githubDialogOpen && (
-        <div
-          className="modal-backdrop"
+        <DialogShell
+          title="Connect GitHub repository"
+          description="Paste the GitHub URL for this group’s project."
           onClick={(event) => {
             if (event.target === event.currentTarget && !connectingGithub) setGithubDialogOpen(false)
           }}
         >
-          <form className="modal-card" onSubmit={connectGithub}>
-            <div className="modal-head">
-              <div>
-                <h3>Connect GitHub repository</h3>
-                <p>Paste the GitHub URL for this group’s project.</p>
-              </div>
-            </div>
-            <div className="modal-body">
-              <label htmlFor="github-repo-url">GitHub repository URL</label>
-              <input
-                id="github-repo-url"
-                value={githubRepoUrl}
-                onChange={(event) => setGithubRepoUrl(event.target.value)}
-                placeholder="https://github.com/owner/repository"
-                autoFocus
-              />
-            </div>
+          <form className="modal-body" onSubmit={connectGithub}>
+            <label htmlFor="github-repo-url">GitHub repository URL</label>
+            <Input
+              id="github-repo-url"
+              value={githubRepoUrl}
+              onChange={(event) => setGithubRepoUrl(event.target.value)}
+              placeholder="https://github.com/owner/repository"
+              autoFocus
+            />
             <div className="modal-actions">
-              <button type="button" className="btn btn-sm" onClick={() => setGithubDialogOpen(false)} disabled={connectingGithub}>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setGithubDialogOpen(false)} disabled={connectingGithub}>
                 Cancel
-              </button>
-              <button type="submit" className="btn btn-sm btn-primary" disabled={connectingGithub || githubRepoUrl.trim().length === 0}>
+              </Button>
+              <Button type="submit" variant="primary" size="sm" disabled={connectingGithub || githubRepoUrl.trim().length === 0}>
                 {connectingGithub ? 'Connecting…' : 'Connect GitHub'}
-              </button>
+              </Button>
             </div>
           </form>
-        </div>
+        </DialogShell>
       )}
     </>
   )
@@ -325,9 +245,9 @@ function GroupMembersView({ groupMembers }: { groupMembers: Member[] }) {
           <div className="student-list compact">
             {groupMembers.map((student) => (
               <div className="student-row" key={student.userId}>
-                <div className="student-avatar">{initials(student.displayName)}</div>
+                <Avatar className="student-avatar" fallback={initials(studentDisplayLabel(student))} style={studentAvatarStyle(student)} />
                 <div className="student-main">
-                  <span className="student-name">{student.displayName}</span>
+                  <span className="student-name">{studentDisplayLabel(student)}{student.movedFromGroupId && <span className="student-moved-marker" title="Moved from another group">*</span>}</span>
                   <span className="student-meta">Added {relativeTime(student.joinedAt)}</span>
                 </div>
               </div>
@@ -377,6 +297,7 @@ function AddStudentsView({
       <section className="student-section">
         <div className="student-section-header">
           <h3>Available students</h3>
+          <p>Add students here, or move them from another group in this assignment.</p>
           <span>{availableStudents.length}</span>
         </div>
         {availableStudents.length === 0 ? (
@@ -385,19 +306,20 @@ function AddStudentsView({
           <div className="student-list">
             {availableStudents.map((student) => (
               <div className="student-row" key={student.userId}>
-                <div className="student-avatar">{initials(student.displayName)}</div>
+                <Avatar className="student-avatar" fallback={initials(studentDisplayLabel(student))} style={studentAvatarStyle(student)} />
                 <div className="student-main">
-                  <span className="student-name">{student.displayName}</span>
+                  <span className="student-name">{studentDisplayLabel(student)}</span>
                   <span className="student-meta">Joined course {relativeTime(student.joinedAt)}</span>
                 </div>
-                <button
-                  className="btn btn-sm btn-primary"
+                <Button
+                  variant="primary"
+                  size="sm"
                   disabled={assigningUserId === student.userId}
                   onClick={() => onAssign(student)}
                 >
                   <UserPlus size={12} />
-                  {assigningUserId === student.userId ? 'Adding' : 'Add'}
-                </button>
+                  {assigningUserId === student.userId ? 'Moving' : 'Add / Move'}
+                </Button>
               </div>
             ))}
           </div>
@@ -415,9 +337,9 @@ function AddStudentsView({
           <div className="student-list compact">
             {groupMembers.map((student) => (
               <div className="student-row" key={student.userId}>
-                <div className="student-avatar">{initials(student.displayName)}</div>
+                <Avatar className="student-avatar" fallback={initials(studentDisplayLabel(student))} style={studentAvatarStyle(student)} />
                 <div className="student-main">
-                  <span className="student-name">{student.displayName}</span>
+                  <span className="student-name">{studentDisplayLabel(student)}{student.movedFromGroupId && <span className="student-moved-marker" title="Moved from another group">*</span>}</span>
                   <span className="student-meta">Added {relativeTime(student.joinedAt)}</span>
                 </div>
                 <span className="student-status">Assigned</span>
@@ -443,96 +365,11 @@ function CloneUrlButton({ url }: { url: string }) {
     }
   }
   return (
-    <button className={`clone-url ${copied ? 'copied' : ''}`} onClick={copy} title={url}>
+    <Button className={`clone-url ${copied ? 'copied' : ''}`} variant="secondary" size="sm" onClick={copy} title={url}>
       {copied ? <Check size={12} /> : <Copy size={12} />}
       <span>{copied ? 'Copied' : 'Clone URL'}</span>
-    </button>
+    </Button>
   )
 }
 
 
-/* ============ History ============ */
-
-function HistoryView({
-  entries,
-  diff,
-  emptyTitle,
-  emptyDescription,
-}: {
-  entries: HistoryEntry[] | null
-  diff: ReactNode
-  emptyTitle: string
-  emptyDescription: string
-}) {
-  if (entries === null) {
-    return (
-      <div style={{ padding: 16 }}>
-        <div className="skeleton-row" />
-        <div className="skeleton-row" style={{ width: '70%' }} />
-        <div className="skeleton-row" style={{ width: '85%' }} />
-      </div>
-    )
-  }
-  if (entries.length === 0) {
-    return (
-      <div className="detail-empty">
-        <div className="icon-circle"><GitCommit size={22} /></div>
-        <h3>{emptyTitle}</h3>
-        <p>{emptyDescription}</p>
-      </div>
-    )
-  }
-  return (
-    <div className="history-layout">
-      {diff}
-    </div>
-  )
-}
-
-function HistoryCommitList({
-  entries,
-  emptyMessage,
-  selectedHash,
-  onSelect,
-}: {
-  entries: HistoryEntry[] | null
-  emptyMessage: string
-  selectedHash: string | null
-  onSelect: (entry: HistoryEntry) => void
-}) {
-  if (entries === null) {
-    return (
-      <div className="history-list">
-        <div className="skeleton-row" />
-        <div className="skeleton-row" style={{ width: '70%' }} />
-        <div className="skeleton-row" style={{ width: '85%' }} />
-      </div>
-    )
-  }
-
-  if (entries.length === 0) {
-    return <div className="sidebar-empty">{emptyMessage}</div>
-  }
-
-  return (
-    <div className="history-list">
-      {entries.map((entry) => (
-        <button
-          className={`history-row ${selectedHash === entry.hash ? 'active' : ''}`}
-          key={entry.hash}
-          title={entry.message}
-          onClick={() => onSelect(entry)}
-        >
-          <span className="commit-dot" />
-          <span className="message">{entry.message}</span>
-          <span className="hash">{entry.hash.slice(0, 7)}</span>
-          <span className="meta-line">
-            {entry.pushedBy && <span>Pushed by: {entry.pushedBy}</span>}
-            {entry.pushedBy && <span>·</span>}
-            <span className="when" title={entry.when}>{relativeTime(entry.when)}</span>
-          </span>
-        </button>
-      ))}
-    </div>
-  )
-}

@@ -7,8 +7,11 @@ export type GroupMemberSummary = {
   userId: string;
   username: string;
   displayName: string;
+  email: string | null;
+  avatarColor: string | null;
   role: string;
   githubUsername: string | null;
+  movedFromGroupId: string | null;
   joinedAt: string;
 };
 
@@ -17,6 +20,7 @@ export type DashboardMemberRow = {
   username: string;
   displayName: string;
   email: string | null;
+  avatarColor: string | null;
   userGithubUsername: string | null;
   groupGithubUsername: string | null;
 };
@@ -28,8 +32,11 @@ export function listGroupMembers(groupId: string): GroupMemberSummary[] {
       userId: users.id,
       username: users.deviceHash,
       displayName: users.displayName,
+      email: users.email,
+      avatarColor: users.avatarColor,
       role: groupMembers.role,
       githubUsername: groupMembers.githubUsername,
+      movedFromGroupId: groupMembers.movedFromGroupId,
       joinedAt: groupMembers.joinedAt,
     })
     .from(groupMembers)
@@ -44,6 +51,7 @@ export function listDashboardMembers(groupId: string): DashboardMemberRow[] {
       userId: users.id,
       username: users.deviceHash,
       displayName: users.displayName,
+      avatarColor: users.avatarColor,
       email: users.email,
       userGithubUsername: users.githubUsername,
       groupGithubUsername: groupMembers.githubUsername,

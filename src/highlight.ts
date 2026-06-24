@@ -36,7 +36,7 @@ const loadedLangs = new Set<string>()
 function getHighlighter() {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighterCore({
-      themes: [import('shiki/themes/github-dark-default.mjs')],
+      themes: [import('shiki/themes/github-light-default.mjs')],
       langs: [],
       engine: createOnigurumaEngine(import('shiki/wasm')),
     })
@@ -60,6 +60,6 @@ export async function highlight(code: string, lang: string): Promise<string> {
   }
   return hl.codeToHtml(code, {
     lang: loadedLangs.has(lang) ? lang : 'text',
-    theme: 'github-dark-default',
+    theme: 'github-light-default',
   })
 }

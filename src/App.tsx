@@ -2,15 +2,48 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Toaster, toast } from 'sonner'
 import {
   BookOpen, Users, ChevronRight, Plus, Search, LogOut, Copy, Check,
-  PanelLeftClose, PanelLeft,
-  Settings, KeyRound, GraduationCap, UserRound, Inbox, AlertCircle,
-  ClipboardList, CalendarDays,
+  Settings, KeyRound, GraduationCap, UserRound, AlertCircle,
+  ClipboardList, CalendarDays, ArrowUpRight, Home, MoreVertical, PanelLeftClose,
 } from 'lucide-react'
-import './App.css'
 import { api, getApiBase } from './api'
+import { studentAvatarStyle } from './avatar'
 import { initials } from './format'
-import type { Assignment, Course, CourseCalendarItem, Group, Member, Professor, Role, Session, User } from './types'
+import type { Assignment, Course, CourseCalendarItem, Group, Member, Professor, ProfessorGithubConnection, Role, Session, User } from './types'
 import { GroupDetail } from './components/groups/GroupDetail'
+import {
+  Avatar,
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  DialogShell,
+  EmptyState,
+  Input,
+  Select,
+  Textarea,
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
+  SidebarProvider,
+  SidebarRail,
+  SidebarTrigger,
+  StatCard,
+  Tabs,
+  TabsList,
+  TabsTrigger,
+} from './components/ui'
+import './App.css'
 
 function showError(err: unknown, fallback = 'Something went wrong') {
   toast.error(err instanceof Error ? err.message : fallback)
@@ -158,31 +191,27 @@ function App() {
     else localStorage.removeItem('miyagi.session')
   }
 
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    const oauthResult = url.searchParams.get('github_oauth')
+    if (!oauthResult) return
+    if (oauthResult === 'connected') toast.success('GitHub account connected')
+    else if (oauthResult === 'missing_config') toast.error('GitHub OAuth is not configured yet')
+    else toast.error('GitHub OAuth did not complete')
+    url.searchParams.delete('github_oauth')
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
+  }, [])
+
   return (
     <>
-      <Toaster theme="dark" position="bottom-right" toastOptions={{ style: { background: '#222', border: '1px solid #333', color: '#e4e4e4' } }} />
+      <Toaster theme="light" position="bottom-right" toastOptions={{ style: { background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', color: 'hsl(var(--popover-foreground))' } }} />
       {!session ? (
         <LoginScreen onLogin={saveSession} />
       ) : (
-        <div className="app-shell">
-          <header className="titlebar">
-            <div className="brand">
-              <span className="brand-mark" />
-              <span>Miyagi</span>
-            </div>
-            <div className="titlebar-meta">
-              <span className="role-pill">
-                {session.role === 'professor' ? <GraduationCap size={12} /> : <UserRound size={12} />}
-                {session.role === 'professor' ? session.displayName : session.user.displayName}
-              </span>
-              <button className="btn-icon" title="Log out" onClick={() => saveSession(null)}>
-                <LogOut size={14} />
-              </button>
-            </div>
-          </header>
+        <div className="app-shell app-shell-sidebar">
           {session.role === 'professor'
-            ? <Dashboard role="professor" professor={session.professor} displayName={session.displayName} />
-            : <Dashboard role="student" user={session.user} onStudentUpdated={(user) => saveSession({ role: 'student', user })} />
+            ? <Dashboard role="professor" professor={session.professor} displayName={session.displayName} onProfessorUpdated={(professor) => saveSession({ role: 'professor', professor, displayName: professor.user?.displayName ?? session.displayName })} onLogout={() => saveSession(null)} />
+            : <Dashboard role="student" user={session.user} onStudentUpdated={(user) => saveSession({ role: 'student', user })} onLogout={() => saveSession(null)} />
           }
         </div>
       )}
@@ -208,24 +237,29 @@ function LoginScreen({ onLogin }: { onLogin: (session: Session) => void }) {
     setError(null)
     setSubmitting(true)
     try {
+      const accountName = username.trim()
       if (mode === 'login') {
         try {
-          const professor = await api<Professor>('/auth/professor/login', { method: 'POST', body: JSON.stringify({ username, password }) })
-          onLogin({ role: 'professor', professor, displayName: username })
+          const professor = await api<Professor>('/auth/professor/login', { method: 'POST', body: JSON.stringify({ username: accountName, password }) })
+          onLogin({ role: 'professor', professor, displayName: professor.user?.displayName ?? accountName })
           return
         } catch {
-          const user = await api<User>('/auth/student/login', { method: 'POST', body: JSON.stringify({ username, password }) })
-          onLogin({ role: 'student', user })
-          return
+          try {
+            const user = await api<User>('/auth/student/login', { method: 'POST', body: JSON.stringify({ username: accountName, password }) })
+            onLogin({ role: 'student', user })
+            return
+          } catch {
+            throw new Error('Invalid username or password')
+          }
         }
       }
 
       if (role === 'student') {
-        const user = await api<User>('/auth/student/register', { method: 'POST', body: JSON.stringify({ username, password, displayName }) })
+        const user = await api<User>('/auth/student/register', { method: 'POST', body: JSON.stringify({ username: accountName, password, displayName }) })
         onLogin({ role: 'student', user })
       } else {
-        const professor = await api<Professor>('/auth/professor/register', { method: 'POST', body: JSON.stringify({ username, password, displayName }) })
-        onLogin({ role: 'professor', professor, displayName: displayName || username })
+        const professor = await api<Professor>('/auth/professor/register', { method: 'POST', body: JSON.stringify({ username: accountName, password, displayName }) })
+        onLogin({ role: 'professor', professor, displayName: professor.user?.displayName ?? (displayName || accountName) })
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not log in')
@@ -240,51 +274,65 @@ function LoginScreen({ onLogin }: { onLogin: (session: Session) => void }) {
   }
 
   return (
-    <main className="login-shell">
-      <form className="login-card" onSubmit={submit}>
+    <main className="login-shell login-shell-remake">
+      <section className="login-hero login-hero-remake" aria-labelledby="login-title">
+        <Badge variant="accent" className="site-kicker"><span className="brand-mark" /> Miyagi</Badge>
+        <h1 id="login-title">A calm command center for courses, teams, and code review.</h1>
+        <p>Publish assignments, organize groups, inspect repository work, and keep the semester moving without dashboard clutter.</p>
+        <div className="hero-points" aria-label="Miyagi features">
+          <span><Users size={14} /> Group workspaces</span>
+          <span><ClipboardList size={14} /> Assignment tracking</span>
+          <span><CalendarDays size={14} /> Course calendar</span>
+        </div>
+      </section>
+
+      <form className="login-card ui-card login-card-remake" onSubmit={submit}>
         <div className="login-header">
-          <h1><span className="brand-mark" /> Miyagi</h1>
-          <p>{mode === 'login' ? 'Use your Miyagi account to continue.' : 'Create your account to get started.'}</p>
+          <Badge variant="muted" className="eyebrow">{mode === 'login' ? 'Welcome back' : 'Create your account'}</Badge>
+          <h2>{mode === 'login' ? 'Sign in to Miyagi' : 'Start using Miyagi'}</h2>
+          <p>{mode === 'login' ? 'Use your account to continue to your dashboard.' : 'Choose your role and create a browser-based workspace.'}</p>
         </div>
 
         {mode === 'register' && (
-          <div className="segmented" aria-label="Account type">
-            <button type="button" className={role === 'professor' ? 'active' : ''} onClick={() => setRole('professor')}>
-              <GraduationCap size={14} /> Professor
-            </button>
-            <button type="button" className={role === 'student' ? 'active' : ''} onClick={() => setRole('student')}>
-              <UserRound size={14} /> Student
-            </button>
-          </div>
+          <Tabs aria-label="Account type">
+            <TabsList className="segmented segmented-remake">
+              <TabsTrigger active={role === 'professor'} onClick={() => setRole('professor')}>
+                <GraduationCap size={14} /> Professor
+              </TabsTrigger>
+              <TabsTrigger active={role === 'student'} onClick={() => setRole('student')}>
+                <UserRound size={14} /> Student
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
         )}
 
         {mode === 'register' && (
-          <input placeholder="Display name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} autoFocus />
+          <Input placeholder="Display name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} autoFocus />
         )}
-        <input placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} required autoFocus={mode === 'login'} />
-        <input placeholder="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        <Input placeholder="Email or username" value={username} onChange={(e) => setUsername(e.target.value)} required autoFocus={mode === 'login'} />
+        <Input placeholder="Password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
 
         {error && <div className="error"><AlertCircle size={14} /> {error}</div>}
 
-        <button type="submit" className="btn btn-primary" disabled={submitting} style={{ height: 36, justifyContent: 'center' }}>
+        <Button type="submit" variant="primary" size="lg" disabled={submitting} className="login-submit">
           {submitting ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
-        </button>
+        </Button>
 
-        <button type="button" className="toggle-link" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
+        <Button type="button" variant="ghost" className="toggle-link" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
           {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}
           <strong>{mode === 'login' ? 'Sign up' : 'Sign in'}</strong>
-        </button>
+        </Button>
 
         <div className="expander">
-          <button type="button" className="expander-toggle" onClick={() => setShowSettings(!showSettings)}>
+          <Button type="button" variant="ghost" className="expander-toggle" onClick={() => setShowSettings(!showSettings)}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Settings size={12} /> Backend settings</span>
             <ChevronRight size={14} style={{ transform: showSettings ? 'rotate(90deg)' : 'none', transition: 'transform 120ms' }} />
-          </button>
+          </Button>
           {showSettings && (
             <div className="expander-body">
               <label>Backend URL</label>
-              <input value={apiBase} onChange={(e) => setApiBase(e.target.value)} placeholder="http://localhost:3000" />
-              <button type="button" className="btn btn-sm" onClick={saveApiBase} style={{ justifySelf: 'start' }}>Save</button>
+              <Input value={apiBase} onChange={(e) => setApiBase(e.target.value)} placeholder="http://localhost:3000" />
+              <Button type="button" variant="secondary" size="sm" onClick={saveApiBase} style={{ justifySelf: 'start' }}>Save</Button>
             </div>
           )}
         </div>
@@ -296,15 +344,17 @@ function LoginScreen({ onLogin }: { onLogin: (session: Session) => void }) {
 /* ============ Dashboard ============ */
 
 type DashboardProps =
-  | { role: 'professor'; professor: Professor; displayName: string }
-  | { role: 'student'; user: User; onStudentUpdated: (user: User) => void }
+  | { role: 'professor'; professor: Professor; displayName: string; onProfessorUpdated: (professor: Professor) => void; onLogout: () => void }
+  | { role: 'student'; user: User; onStudentUpdated: (user: User) => void; onLogout: () => void }
 
 function Dashboard(props: DashboardProps) {
   const [courses, setCourses] = useState<Course[] | null>(null)
   const [assignmentsByCourse, setAssignmentsByCourse] = useState<Record<string, Assignment[]>>({})
   const [groupsByAssignment, setGroupsByAssignment] = useState<Record<string, Group[]>>({})
+  const [studentGroups, setStudentGroups] = useState<Group[] | null>(props.role === 'student' ? null : [])
   const [expandedCourses, setExpandedCourses] = useState<Set<string>>(new Set())
   const [expandedAssignments, setExpandedAssignments] = useState<Set<string>>(new Set())
+  const [expandedMyGroups, setExpandedMyGroups] = useState(true)
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null)
   const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null)
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null)
@@ -312,10 +362,32 @@ function Dashboard(props: DashboardProps) {
   const [collapsed, setCollapsed] = useState(false)
   const [sidebarContent, setSidebarContent] = useState<ReactNode | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
-  const currentStudentGithubUsername = props.role === 'student' ? props.user.githubUsername ?? '' : ''
-  const [githubUsernameDialogOpen, setGithubUsernameDialogOpen] = useState(false)
-  const [githubUsernameInput, setGithubUsernameInput] = useState(currentStudentGithubUsername)
-  const [savingGithubUsername, setSavingGithubUsername] = useState(false)
+  const [accountDialogOpen, setAccountDialogOpen] = useState(false)
+  const [professorGithubConnection, setProfessorGithubConnection] = useState<ProfessorGithubConnection | null>(null)
+  const accountUserId = props.role === 'professor' ? props.professor.userId : props.user.id
+  const accountDisplayName = props.role === 'professor' ? props.displayName : props.user.displayName
+  const accountGithubUsername = props.role === 'student' ? props.user.githubUsername ?? '' : professorGithubConnection?.githubUsername ?? props.professor.user?.githubUsername ?? ''
+  const accountAvatarColor = props.role === 'student' ? props.user.avatarColor ?? null : null
+
+  const handleAccountUpdated = useCallback((user: User) => {
+    if (props.role === 'student') props.onStudentUpdated(user)
+    else props.onProfessorUpdated({ ...props.professor, user })
+  }, [props.role, props])
+
+  useEffect(() => {
+    if (props.role !== 'professor') return
+    let ignore = false
+    api<ProfessorGithubConnection>(`/professors/${props.professor.id}/github`)
+      .then((connection) => {
+        if (!ignore) setProfessorGithubConnection(connection)
+      })
+      .catch(() => {
+        if (!ignore) setProfessorGithubConnection({ connected: false, githubUsername: null, scope: null })
+      })
+    return () => {
+      ignore = true
+    }
+  }, [props.role, props.role === 'professor' ? props.professor.id : null])
 
   const refreshCourses = useCallback(async () => {
     try {
@@ -330,35 +402,28 @@ function Dashboard(props: DashboardProps) {
   }, [props])
 
   useEffect(() => {
-    if (props.role !== 'student') return
-    setGithubUsernameInput(currentStudentGithubUsername)
-    setGithubUsernameDialogOpen(false)
-    setSavingGithubUsername(false)
-  }, [currentStudentGithubUsername, props.role])
-
-  const saveGithubUsername = useCallback(async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (props.role !== 'student') return
-    try {
-      setSavingGithubUsername(true)
-      const user = await api<User>(`/users/${props.user.id}/github`, {
-        method: 'PATCH',
-        body: JSON.stringify({ githubUsername: githubUsernameInput }),
-      })
-      props.onStudentUpdated(user)
-      setGithubUsernameDialogOpen(false)
-      toast.success('GitHub username saved')
-    } catch (err) {
-      showError(err, 'Could not save GitHub username')
-    } finally {
-      setSavingGithubUsername(false)
-    }
-  }, [githubUsernameInput, props])
-
-  useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     refreshCourses()
   }, [refreshCourses])
+
+  const refreshStudentGroups = useCallback(async () => {
+    if (props.role !== 'student') {
+      setStudentGroups([])
+      return
+    }
+    try {
+      const groups = await api<Group[]>(`/groups/user/${props.user.id}`)
+      setStudentGroups(groups)
+    } catch (err) {
+      showError(err, 'Could not load your groups')
+      setStudentGroups([])
+    }
+  }, [props])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refreshStudentGroups()
+  }, [refreshStudentGroups])
 
   const loadAssignments = useCallback(async (course: Course) => {
     try {
@@ -437,8 +502,36 @@ function Dashboard(props: DashboardProps) {
     setSelectedGroup(group)
   }
 
+  const selectStudentGroup = async (group: Group) => {
+    if (!group.courseId || !group.assignmentId) return
+    const course = courses?.find((candidate) => candidate.id === group.courseId)
+    if (!course) return
+
+    let assignments = assignmentsByCourse[course.id]
+    if (!assignments) {
+      try {
+        assignments = await api<Assignment[]>(`/courses/${course.id}/assignments`)
+        setAssignmentsByCourse((prev) => ({ ...prev, [course.id]: assignments ?? [] }))
+      } catch (err) {
+        showError(err, 'Could not load assignments')
+        return
+      }
+    }
+
+    const assignment = assignments.find((candidate) => candidate.id === group.assignmentId)
+    if (!assignment) return
+    setSelectedCourseId(course.id)
+    setSelectedAssignment(assignment)
+    setSelectedGroup(group)
+    setExpandedCourses((prev) => new Set(prev).add(course.id))
+    setExpandedAssignments((prev) => new Set(prev).add(assignment.id))
+  }
+
   const handleGroupUpdated = useCallback((updatedGroup: Group) => {
     setSelectedGroup((current) => current?.id === updatedGroup.id ? updatedGroup : current)
+    setStudentGroups((current) => current?.map((group) => (
+      group.id === updatedGroup.id ? updatedGroup : group
+    )) ?? current)
     const assignmentId = updatedGroup.assignmentId
     if (!assignmentId) return
     setGroupsByAssignment((current) => ({
@@ -465,7 +558,7 @@ function Dashboard(props: DashboardProps) {
     const q = search.trim().toLowerCase()
     if (!q) return courses
     return courses.filter((c) => {
-      if (c.name.toLowerCase().includes(q) || c.joinCode.toLowerCase().includes(q)) return true
+      if (c.name.toLowerCase().includes(q) || (props.role === 'professor' && c.joinCode?.toLowerCase().includes(q))) return true
       const assignments = assignmentsByCourse[c.id] ?? []
       return assignments.some((assignment) => {
         if (assignment.name.toLowerCase().includes(q)) return true
@@ -479,181 +572,466 @@ function Dashboard(props: DashboardProps) {
 
   const userDisplayName = props.role === 'professor' ? props.displayName : props.user.displayName
   const sidebarTitle = sidebarContent ? 'Commits' : props.role === 'professor' ? 'My Courses' : 'Enrolled Courses'
+  const courseCount = courses?.length ?? 0
+  const assignmentCount = Object.values(assignmentsByCourse).reduce((total, assignments) => total + assignments.length, 0)
+  const groupCount = Object.values(groupsByAssignment).reduce((total, groups) => total + groups.length, 0)
+  const primaryEmptyTitle = props.role === 'professor' ? 'Account home' : 'Student home'
+  const primaryEmptyCopy = props.role === 'professor'
+    ? 'Create a course, import students, publish assignments, and review group work from the sidebar.'
+    : 'Join courses, find assignments, and keep your group work organized from the sidebar.'
+  const pageTitle = selectedGroup?.name ?? selectedAssignment?.name ?? selectedCourse?.name ?? primaryEmptyTitle
+  const pageSubtitle = selectedGroup && selectedCourse && selectedAssignment
+    ? `${selectedCourse.name} / ${selectedAssignment.name}`
+    : selectedAssignment && selectedCourse
+      ? selectedCourse.name
+      : selectedCourse
+        ? `${assignmentCount} ${assignmentCount === 1 ? 'assignment' : 'assignments'}`
+        : primaryEmptyCopy
 
   return (
-    <div className={`dashboard ${collapsed ? 'collapsed' : ''}`}>
-      {!collapsed && (
-        <aside className="sidebar">
-          <div className="sidebar-header">
-            <span className="sidebar-title">{sidebarTitle}</span>
-            <button className="btn-icon" title="Collapse sidebar" onClick={() => setCollapsed(true)}>
-              <PanelLeftClose size={14} />
-            </button>
-          </div>
+    <SidebarProvider
+      className="miyagi-sidebar-provider"
+      open={!collapsed}
+      onOpenChange={(open) => setCollapsed(!open)}
+    >
+      <Sidebar variant="sidebar" collapsible="icon" className="miyagi-sidebar">
+        <SidebarHeader>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton size="lg" className="sidebar-brand-button">
+                <span className="brand-mark" />
+                <span className="sidebar-brand-copy">
+                  <strong>Miyagi</strong>
+                  <small>{props.role === 'professor' ? 'Professor workspace' : 'Student workspace'}</small>
+                </span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarHeader>
+
+        <SidebarContent>
           {!sidebarContent && (
-            <div className="sidebar-search">
+            <div className="sidebar-search ui-sidebar-search">
               <Search size={13} className="search-icon" />
-              <input
+              <Input
                 ref={searchRef}
-                placeholder="Search courses, assignments, groups…"
+                placeholder="Quick search..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
               <span className="kbd-hint">⌘K</span>
             </div>
           )}
-          <div className="sidebar-body">
-            {sidebarContent ?? (
-              <>
-                {props.role === 'student' && (
-                  <JoinCourseForm onJoined={refreshCourses} userId={props.user.id} />
-                )}
-                {props.role === 'professor' && (
-                  <CreateCourseForm onCreated={refreshCourses} professorId={props.professor.id} />
-                )}
 
-                {courses === null ? (
-                  <>
-                    <div className="skeleton-row" />
-                    <div className="skeleton-row" style={{ width: '70%' }} />
-                    <div className="skeleton-row" style={{ width: '85%' }} />
-                  </>
-                ) : filteredCourses && filteredCourses.length === 0 ? (
-                  <div className="sidebar-empty">
-                    {search ? 'No matches.' : props.role === 'professor'
-                      ? 'No courses yet. Create one above.'
-                      : 'No courses yet. Use a join code above.'}
-                  </div>
-                ) : (
-                  filteredCourses?.map((course) => (
-                    <CourseNode
-                      key={course.id}
-                      role={props.role}
-                      course={course}
-                      assignments={assignmentsByCourse[course.id]}
-                      groupsByAssignment={groupsByAssignment}
-                      expanded={expandedCourses.has(course.id)}
-                      expandedAssignments={expandedAssignments}
-                      active={selectedCourseId === course.id && !selectedAssignment && !selectedGroup}
-                      activeAssignmentId={selectedAssignment?.id ?? null}
-                      activeGroupId={selectedGroup?.id ?? null}
-                      onToggle={() => toggleCourse(course.id)}
-                      onToggleAssignment={toggleAssignment}
-                      onSelectCourse={() => selectCourse(course)}
-                      onSelectAssignment={(assignment) => selectAssignment(course, assignment)}
-                      onSelectGroup={(assignment, group) => selectGroup(course, assignment, group)}
-                      onAssignmentCreated={() => loadAssignments(course)}
-                      onGroupCreated={(assignment) => loadGroups(assignment)}
-                      professorId={props.role === 'professor' ? props.professor.id : undefined}
-                    />
-                  ))
-                )}
-              </>
-            )}
-          </div>
-          <div className="sidebar-footer">
-            <div className="user-info">
-              <div className="avatar">{initials(userDisplayName)}</div>
-              <div className="user-text">
-                <span className="name">{userDisplayName}</span>
-                {props.role === 'student' && props.user.githubUsername && (
-                  <span className="meta">GitHub: {props.user.githubUsername}</span>
-                )}
-              </div>
+          {sidebarContent ? (
+            <SidebarGroup>
+              <SidebarGroupLabel>{sidebarTitle}</SidebarGroupLabel>
+              <SidebarGroupContent>{sidebarContent}</SidebarGroupContent>
+            </SidebarGroup>
+          ) : (
+            <>
+              <SidebarGroup>
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton isActive={!selectedCourse && !selectedAssignment && !selectedGroup} onClick={() => {
+                      setSelectedCourseId(null)
+                      setSelectedAssignment(null)
+                      setSelectedGroup(null)
+                    }}>
+                      <Home />
+                      <span>Account home</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </SidebarGroup>
+
+              {props.role === 'student' && (
+                <SidebarGroup>
+                  <SidebarGroupLabel>Student</SidebarGroupLabel>
+                  <SidebarGroupContent>
+                    <SidebarMenu>
+                      <SidebarMenuItem>
+                        <SidebarMenuButton onClick={() => setExpandedMyGroups((open) => !open)}>
+                          <ChevronRight className={`chev ${expandedMyGroups ? 'open' : ''}`} />
+                          <Users />
+                          <span>My groups</span>
+                          {studentGroups && <span className="sidebar-count">{studentGroups.length}</span>}
+                        </SidebarMenuButton>
+                        {expandedMyGroups && (
+                          <SidebarMenuSub>
+                            {studentGroups === null ? (
+                              <SidebarMenuSubItem><div className="skeleton-row" /></SidebarMenuSubItem>
+                            ) : studentGroups.length === 0 ? (
+                              <SidebarMenuSubItem><div className="sidebar-empty compact">No groups yet.</div></SidebarMenuSubItem>
+                            ) : (
+                              studentGroups.map((group) => (
+                                <SidebarMenuSubItem key={group.id}>
+                                  <SidebarMenuSubButton
+                                    isActive={selectedGroup?.id === group.id}
+                                    onClick={() => void selectStudentGroup(group)}
+                                  >
+                                    <Users />
+                                    <span>{group.name}</span>
+                                  </SidebarMenuSubButton>
+                                </SidebarMenuSubItem>
+                              ))
+                            )}
+                          </SidebarMenuSub>
+                        )}
+                      </SidebarMenuItem>
+                    </SidebarMenu>
+                  </SidebarGroupContent>
+                </SidebarGroup>
+              )}
+
+              <SidebarGroup>
+                <SidebarGroupLabel>{props.role === 'professor' ? 'Courses' : 'Enrolled'}</SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    <SidebarMenuItem>
+                      {props.role === 'student' ? (
+                        <JoinCourseForm onJoined={refreshCourses} userId={props.user.id} />
+                      ) : (
+                        <CreateCourseForm onCreated={refreshCourses} professorId={props.professor.id} />
+                      )}
+                    </SidebarMenuItem>
+                    {courses === null ? (
+                      <>
+                        <SidebarMenuItem><div className="skeleton-row" /></SidebarMenuItem>
+                        <SidebarMenuItem><div className="skeleton-row" style={{ width: '70%' }} /></SidebarMenuItem>
+                        <SidebarMenuItem><div className="skeleton-row" style={{ width: '85%' }} /></SidebarMenuItem>
+                      </>
+                    ) : filteredCourses && filteredCourses.length === 0 ? (
+                      <SidebarMenuItem>
+                        <div className="sidebar-empty">
+                          {search ? 'No matches.' : props.role === 'professor'
+                            ? 'No courses yet. Create one above.'
+                            : 'No courses yet. Use a join code above.'}
+                        </div>
+                      </SidebarMenuItem>
+                    ) : (
+                      filteredCourses?.map((course) => (
+                        <CourseNode
+                          key={course.id}
+                          role={props.role}
+                          course={course}
+                          assignments={assignmentsByCourse[course.id]}
+                          groupsByAssignment={groupsByAssignment}
+                          expanded={expandedCourses.has(course.id)}
+                          expandedAssignments={expandedAssignments}
+                          active={selectedCourseId === course.id && !selectedAssignment && !selectedGroup}
+                          activeAssignmentId={selectedAssignment?.id ?? null}
+                          activeGroupId={selectedGroup?.id ?? null}
+                          onToggle={() => toggleCourse(course.id)}
+                          onToggleAssignment={toggleAssignment}
+                          onSelectCourse={() => selectCourse(course)}
+                          onSelectAssignment={(assignment) => selectAssignment(course, assignment)}
+                          onSelectGroup={(assignment, group) => selectGroup(course, assignment, group)}
+                          onAssignmentCreated={() => loadAssignments(course)}
+                          onGroupCreated={(assignment) => loadGroups(assignment)}
+                          professorId={props.role === 'professor' ? props.professor.id : undefined}
+                        />
+                      ))
+                    )}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            </>
+          )}
+        </SidebarContent>
+
+        <SidebarFooter>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton size="lg" onClick={() => setAccountDialogOpen(true)}>
+                <Avatar fallback={initials(userDisplayName)} style={props.role === 'student' ? studentAvatarStyle({ avatarColor: props.user.avatarColor, userId: props.user.id, username: props.user.deviceHash, displayName: props.user.displayName }) : undefined} />
+                <span className="user-text">
+                  <span className="name">{userDisplayName}</span>
+                  <span className="meta">{props.role === 'student' && props.user.githubUsername ? props.user.githubUsername : props.role === 'professor' && accountGithubUsername ? `GitHub: ${accountGithubUsername}` : 'Account settings'}</span>
+                </span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarFooter>
+        <SidebarRail aria-label="Toggle sidebar" />
+      </Sidebar>
+
+      <SidebarInset className="miyagi-sidebar-inset">
+        <header className="workspace-topbar">
+          <div className="workspace-title">
+            <SidebarTrigger className="workspace-sidebar-trigger"><PanelLeftClose size={14} /></SidebarTrigger>
+            <div>
+              <span>{selectedCourse ? 'Course workspace' : 'Account home'}</span>
+              <h1>{pageTitle}</h1>
+              <p>{pageSubtitle}</p>
             </div>
-            {props.role === 'student' && (
-              <button className="btn btn-sm btn-ghost sidebar-footer-btn" onClick={() => setGithubUsernameDialogOpen(true)}>
-                GitHub
-              </button>
-            )}
           </div>
-        </aside>
-      )}
-
-      {collapsed && (
-        <aside style={{ background: 'var(--sidebar)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '10px 0', gap: 6 }}>
-          <button className="btn-icon" title="Expand sidebar" onClick={() => setCollapsed(false)}>
-            <PanelLeft size={14} />
-          </button>
-        </aside>
-      )}
-
-      <section className="detail">
-        {selectedGroup && selectedCourse && selectedAssignment ? (
-          <GroupDetail
-            key={selectedGroup.id}
-            course={selectedCourse}
-            assignment={selectedAssignment}
-            group={selectedGroup}
-            role={props.role}
-            professorId={props.role === 'professor' ? props.professor.id : undefined}
-            onSidebarContentChange={setSidebarContent}
-            onGroupUpdated={handleGroupUpdated}
-          />
-        ) : selectedAssignment && selectedCourse ? (
-          <AssignmentDetail
-            assignment={selectedAssignment}
-            course={selectedCourse}
-            role={props.role}
-            groups={groupsByAssignment[selectedAssignment.id] ?? []}
-            onSelectGroup={(g) => setSelectedGroup(g)}
-            onGroupCreated={() => loadGroups(selectedAssignment)}
-            professorId={props.role === 'professor' ? props.professor.id : undefined}
-          />
-        ) : selectedCourse ? (
-          <CourseDetail
-            course={selectedCourse}
-            role={props.role}
-            assignments={assignmentsByCourse[selectedCourse.id]}
-            groupsByAssignment={groupsByAssignment}
-            onSelectAssignment={(assignment) => selectAssignment(selectedCourse, assignment)}
-            onAssignmentCreated={() => loadAssignments(selectedCourse)}
-            professorId={props.role === 'professor' ? props.professor.id : undefined}
-          />
-        ) : (
-          <div className="detail-empty">
-            <div className="icon-circle"><Inbox size={26} /></div>
-            <h3>Nothing selected</h3>
-            <p>Pick a course from the sidebar to view its assignments, groups, files, and history.</p>
+          <div className="workspace-actions">
+            <Button variant="ghost" size="icon" title="More actions"><MoreVertical size={15} /></Button>
+            <Button variant="ghost" size="sm" title="Log out" onClick={props.onLogout}>
+              <LogOut size={14} /> Log out
+            </Button>
           </div>
-        )}
-      </section>
-      {props.role === 'student' && githubUsernameDialogOpen && (
-        <div
-          className="modal-backdrop"
-          onClick={(event) => {
-            if (event.target === event.currentTarget && !savingGithubUsername) setGithubUsernameDialogOpen(false)
-          }}
-        >
-          <form className="modal-card" onSubmit={saveGithubUsername}>
-            <div className="modal-head">
-              <div>
-                <h3>GitHub username</h3>
-                <p>Link your Miyagi account to your GitHub username.</p>
-              </div>
-            </div>
-            <div className="modal-body">
-              <label htmlFor="student-github-username">GitHub username</label>
-              <input
-                id="student-github-username"
-                value={githubUsernameInput}
-                onChange={(event) => setGithubUsernameInput(event.target.value)}
-                placeholder="koushik255"
-                autoFocus
+        </header>
+
+        <section className="workspace-content">
+          {selectedGroup && selectedCourse && selectedAssignment ? (
+            <div className="workspace-panel">
+              <GroupDetail
+                key={selectedGroup.id}
+                course={selectedCourse}
+                assignment={selectedAssignment}
+                group={selectedGroup}
+                role={props.role}
+                professorId={props.role === 'professor' ? props.professor.id : undefined}
+                onSidebarContentChange={setSidebarContent}
+                onGroupUpdated={handleGroupUpdated}
               />
             </div>
-            <div className="modal-actions">
-              <button type="button" className="btn btn-sm" onClick={() => setGithubUsernameDialogOpen(false)} disabled={savingGithubUsername}>
-                Cancel
-              </button>
-              <button type="submit" className="btn btn-sm btn-primary" disabled={savingGithubUsername}>
-                {savingGithubUsername ? 'Saving…' : 'Save'}
-              </button>
+          ) : selectedAssignment && selectedCourse ? (
+            <div className="workspace-panel">
+              <AssignmentDetail
+                assignment={selectedAssignment}
+                course={selectedCourse}
+                role={props.role}
+                groups={groupsByAssignment[selectedAssignment.id] ?? []}
+                onSelectGroup={(g) => setSelectedGroup(g)}
+                onGroupCreated={() => loadGroups(selectedAssignment)}
+                professorId={props.role === 'professor' ? props.professor.id : undefined}
+              />
             </div>
-          </form>
+          ) : selectedCourse ? (
+            <div className="workspace-panel">
+              <CourseDetail
+                course={selectedCourse}
+                role={props.role}
+                assignments={assignmentsByCourse[selectedCourse.id]}
+                groupsByAssignment={groupsByAssignment}
+                onSelectAssignment={(assignment) => selectAssignment(selectedCourse, assignment)}
+                onAssignmentCreated={() => loadAssignments(selectedCourse)}
+                professorId={props.role === 'professor' ? props.professor.id : undefined}
+              />
+            </div>
+          ) : (
+            <div className="account-home">
+              <div className="account-metrics">
+                <StatCard icon={<BookOpen size={16} />} value={courseCount} title={courseCount === 1 ? 'Course' : 'Courses'} />
+                <StatCard icon={<ClipboardList size={16} />} value={assignmentCount} title={assignmentCount === 1 ? 'Assignment' : 'Assignments'} />
+                <StatCard icon={<Users size={16} />} value={groupCount} title={groupCount === 1 ? 'Group' : 'Groups'} />
+              </div>
+              <div className="account-home-grid">
+                <Card className="account-home-card">
+                  <div className="account-home-card-head">
+                    <h3>{props.role === 'professor' ? 'Courses' : 'Enrolled courses'}</h3>
+                    <Badge variant="muted">{courseCount}</Badge>
+                  </div>
+                  <div className="account-home-list">
+                    {(courses ?? []).slice(0, 5).map((course) => (
+                      <button key={course.id} onClick={() => selectCourse(course)}>
+                        <BookOpen size={14} />
+                        <span>{course.name}</span>
+                        <ArrowUpRight size={13} />
+                      </button>
+                    ))}
+                    {courses !== null && courses.length === 0 && <p>{primaryEmptyCopy}</p>}
+                  </div>
+                </Card>
+                <Card className="account-home-card">
+                  <div className="account-home-card-head">
+                    <h3>Next steps</h3>
+                    <Badge variant="accent">Ready</Badge>
+                  </div>
+                  <div className="onboarding-grid sidebar-onboarding-grid" aria-label="Getting started">
+                    <article>
+                      <BookOpen size={16} />
+                      <strong>{props.role === 'professor' ? 'Create a course' : 'Join a course'}</strong>
+                      <span>{props.role === 'professor' ? 'Use the sidebar course action to start a course.' : 'Use a join code from your professor.'}</span>
+                    </article>
+                    <article>
+                      <ClipboardList size={16} />
+                      <strong>Track assignments</strong>
+                      <span>Assignments, due dates, groups, files, and review history stay in one place.</span>
+                    </article>
+                  </div>
+                </Card>
+              </div>
+            </div>
+          )}
+        </section>
+        {accountDialogOpen && (
+          <AccountSettingsDialog
+            role={props.role}
+            userId={accountUserId}
+            displayName={accountDisplayName}
+            githubUsername={accountGithubUsername}
+            avatarColor={accountAvatarColor}
+            professorId={props.role === 'professor' ? props.professor.id : undefined}
+            githubConnection={props.role === 'professor' ? professorGithubConnection : null}
+            onClose={() => setAccountDialogOpen(false)}
+            onSaved={handleAccountUpdated}
+            onGithubConnectionChanged={setProfessorGithubConnection}
+          />
+        )}
+      </SidebarInset>
+    </SidebarProvider>
+  )
+}
+
+function AccountSettingsDialog({
+  role,
+  userId,
+  displayName,
+  githubUsername,
+  avatarColor,
+  professorId,
+  githubConnection,
+  onClose,
+  onSaved,
+  onGithubConnectionChanged,
+}: {
+  role: Role
+  userId: string
+  displayName: string
+  githubUsername: string
+  avatarColor: string | null
+  professorId?: string
+  githubConnection?: ProfessorGithubConnection | null
+  onClose: () => void
+  onSaved: (user: User) => void
+  onGithubConnectionChanged?: (connection: ProfessorGithubConnection) => void
+}) {
+  const [nameInput, setNameInput] = useState(displayName)
+  const [avatarColorInput, setAvatarColorInput] = useState(studentAvatarStyle({ avatarColor, userId }).backgroundColor as string)
+  const [githubInput, setGithubInput] = useState(githubUsername)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [githubBusy, setGithubBusy] = useState(false)
+
+  const connectProfessorGithub = () => {
+    if (!professorId) return
+    const returnTo = `${window.location.pathname}${window.location.search}`
+    window.location.href = `${getApiBase()}/auth/professor/github/start?professorId=${encodeURIComponent(professorId)}&returnTo=${encodeURIComponent(returnTo)}`
+  }
+
+  const disconnectProfessorGithub = async () => {
+    if (!professorId) return
+    try {
+      setGithubBusy(true)
+      const connection = await api<ProfessorGithubConnection>(`/professors/${professorId}/github`, { method: 'DELETE' })
+      onGithubConnectionChanged?.(connection)
+      toast.success('GitHub account disconnected')
+    } catch (err) {
+      showError(err, 'Could not disconnect GitHub')
+    } finally {
+      setGithubBusy(false)
+    }
+  }
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setSaving(true)
+    try {
+      const user = await api<User>(`/users/${userId}/account`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          displayName: nameInput,
+          ...(role === 'student' ? { githubUsername: githubInput, avatarColor: avatarColorInput } : {}),
+        }),
+      })
+
+      if (currentPassword || newPassword) {
+        await api<{ ok: true }>(`/users/${userId}/password`, {
+          method: 'PATCH',
+          body: JSON.stringify({ currentPassword, newPassword }),
+        })
+      }
+
+      onSaved(user)
+      toast.success('Account updated')
+      onClose()
+    } catch (err) {
+      showError(err, 'Could not update account')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <DialogShell
+      className="account-dialog"
+      title="Account settings"
+      description="Manage your public profile and password."
+      onClick={(event) => {
+        if (event.target === event.currentTarget && !saving) onClose()
+      }}
+    >
+      <form className="account-form" onSubmit={submit}>
+        <div className="form-section">
+          <label htmlFor="account-display-name">Display name</label>
+          <Input id="account-display-name" value={nameInput} onChange={(event) => setNameInput(event.target.value)} autoFocus />
         </div>
-      )}
-    </div>
+
+        {role === 'student' && (
+          <div className="form-section">
+            <label htmlFor="account-github-username">GitHub username</label>
+            <Input id="account-github-username" value={githubInput} onChange={(event) => setGithubInput(event.target.value)} placeholder="koushik255" />
+          </div>
+        )}
+
+        {role === 'student' && (
+          <div className="form-section">
+            <label htmlFor="account-avatar-color">Avatar color</label>
+            <div className="avatar-color-control">
+              <Avatar fallback={initials(nameInput || displayName)} style={studentAvatarStyle({ avatarColor: avatarColorInput, userId, displayName: nameInput || displayName })} />
+              <Input id="account-avatar-color" type="color" value={avatarColorInput} onChange={(event) => setAvatarColorInput(event.target.value)} aria-label="Avatar color" />
+            </div>
+          </div>
+        )}
+
+        {role === 'professor' && (
+          <div className="form-section github-oauth-section">
+            <div className="github-oauth-copy">
+              <label>GitHub OAuth</label>
+              <p>
+                {githubConnection?.connected && githubConnection.githubUsername
+                  ? `Connected as ${githubConnection.githubUsername}. Miyagi can use this token for professor-owned GitHub repositories.`
+                  : 'Connect a GitHub account. Add GitHub OAuth credentials later with GITHUB_OAUTH_CLIENT_ID, GITHUB_OAUTH_CLIENT_SECRET, and GITHUB_OAUTH_REDIRECT_URI.'}
+              </p>
+            </div>
+            <div className="github-oauth-actions">
+              <Button type="button" variant="primary" size="sm" onClick={connectProfessorGithub} disabled={saving || githubBusy}>
+                <UserRound size={13} /> {githubConnection?.connected ? 'Reconnect GitHub' : 'Connect GitHub'}
+              </Button>
+              {githubConnection?.connected && (
+                <Button type="button" variant="secondary" size="sm" onClick={disconnectProfessorGithub} disabled={saving || githubBusy}>
+                  Disconnect
+                </Button>
+              )}
+            </div>
+            {githubConnection?.scope && <span className="github-oauth-scope">Scopes: {githubConnection.scope}</span>}
+          </div>
+        )}
+
+        <div className="form-section password-section">
+          <div>
+            <label htmlFor="account-current-password">Change password</label>
+            <p>Leave both password fields blank to keep your current password.</p>
+          </div>
+          <Input id="account-current-password" type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} placeholder="Current password" />
+          <Input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="New password, at least 8 characters" />
+        </div>
+
+        <div className="modal-actions">
+          <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" size="sm" disabled={saving}>
+            {saving ? 'Saving…' : 'Save account'}
+          </Button>
+        </div>
+      </form>
+    </DialogShell>
   )
 }
 
@@ -677,15 +1055,15 @@ function CreateCourseForm({ professorId, onCreated }: { professorId: string; onC
   }
   if (!open) {
     return (
-      <button className="tree-row" onClick={() => setOpen(true)} style={{ color: 'var(--text-dim)', justifyContent: 'flex-start' }}>
-        <Plus size={14} /> <span className="label">New course</span>
-      </button>
+      <SidebarMenuButton onClick={() => setOpen(true)}>
+        <Plus /> <span>New course</span>
+      </SidebarMenuButton>
     )
   }
   return (
-    <form onSubmit={submit} className="inline-create" style={{ paddingLeft: 8 }}>
-      <input placeholder="Course name" autoFocus value={name} onChange={(e) => setName(e.target.value)} onBlur={() => !name && setOpen(false)} />
-      <button type="submit" className="btn btn-sm btn-primary">Add</button>
+    <form onSubmit={submit} className="inline-create sidebar-inline-create">
+      <Input placeholder="Course name" autoFocus value={name} onChange={(e) => setName(e.target.value)} onBlur={() => !name && setOpen(false)} />
+      <Button type="submit" variant="primary" size="sm">Add</Button>
     </form>
   )
 }
@@ -708,15 +1086,15 @@ function JoinCourseForm({ userId, onJoined }: { userId: string; onJoined: () => 
   }
   if (!open) {
     return (
-      <button className="tree-row" onClick={() => setOpen(true)} style={{ color: 'var(--text-dim)', justifyContent: 'flex-start' }}>
-        <KeyRound size={14} /> <span className="label">Join with code</span>
-      </button>
+      <SidebarMenuButton onClick={() => setOpen(true)}>
+        <KeyRound /> <span>Join with code</span>
+      </SidebarMenuButton>
     )
   }
   return (
-    <form onSubmit={submit} className="inline-create" style={{ paddingLeft: 8 }}>
-      <input placeholder="Join code" autoFocus value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} onBlur={() => !code && setOpen(false)} />
-      <button type="submit" className="btn btn-sm btn-primary">Join</button>
+    <form onSubmit={submit} className="inline-create sidebar-inline-create">
+      <Input placeholder="Join code" autoFocus value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} onBlur={() => !code && setOpen(false)} />
+      <Button type="submit" variant="primary" size="sm">Join</Button>
     </form>
   )
 }
@@ -756,17 +1134,17 @@ function CreateAssignmentForm({ professorId, courseId, onCreated }: { professorI
   }
   if (!open) {
     return (
-      <button className="assignment-row" onClick={() => setOpen(true)} style={{ color: 'var(--muted)' }}>
-        <Plus size={12} className="icon" /> <span className="label">New assignment</span>
-      </button>
+      <SidebarMenuSubButton onClick={() => setOpen(true)}>
+        <Plus /> <span>New assignment</span>
+      </SidebarMenuSubButton>
     )
   }
   return (
-    <form onSubmit={submit} className="inline-create assignment-create">
-      <input placeholder="Assignment name" autoFocus value={name} onChange={(e) => setName(e.target.value)} />
-      <input type="datetime-local" aria-label="Assignment due date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
-      <button type="submit" className="btn btn-sm btn-primary">Add</button>
-      <button type="button" className="btn btn-sm" onClick={close}>Cancel</button>
+    <form onSubmit={submit} className="inline-create assignment-create sidebar-inline-create">
+      <Input placeholder="Assignment name" autoFocus value={name} onChange={(e) => setName(e.target.value)} />
+      <Input type="datetime-local" aria-label="Assignment due date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+      <Button type="submit" variant="primary" size="sm">Add</Button>
+      <Button type="button" variant="secondary" size="sm" onClick={close}>Cancel</Button>
     </form>
   )
 }
@@ -789,15 +1167,15 @@ function CreateGroupForm({ professorId, assignmentId, onCreated }: { professorId
   }
   if (!open) {
     return (
-      <button className="group-row" onClick={() => setOpen(true)} style={{ color: 'var(--muted)' }}>
-        <Plus size={12} className="icon" /> <span className="label">New group</span>
-      </button>
+      <SidebarMenuSubButton onClick={() => setOpen(true)}>
+        <Plus /> <span>New group</span>
+      </SidebarMenuSubButton>
     )
   }
   return (
-    <form onSubmit={submit} className="inline-create">
-      <input placeholder="Group name" autoFocus value={name} onChange={(e) => setName(e.target.value)} onBlur={() => !name && setOpen(false)} />
-      <button type="submit" className="btn btn-sm btn-primary">Add</button>
+    <form onSubmit={submit} className="inline-create sidebar-inline-create">
+      <Input placeholder="Group name" autoFocus value={name} onChange={(e) => setName(e.target.value)} onBlur={() => !name && setOpen(false)} />
+      <Button type="submit" variant="primary" size="sm">Add</Button>
     </form>
   )
 }
@@ -825,79 +1203,83 @@ function CourseNode({
   professorId?: string
 }) {
   return (
-    <div className="course-group">
-      <button
-        className={`tree-row ${active ? 'active' : ''}`}
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        isActive={active}
         onClick={() => { onSelectCourse(); if (!expanded) onToggle() }}
       >
-        <span
+        <ChevronRight
+          className={`chev ${expanded ? 'open' : ''}`}
           onClick={(e) => { e.stopPropagation(); onToggle() }}
-          style={{ display: 'inline-flex' }}
-        >
-          <ChevronRight size={12} className={`chev ${expanded ? 'open' : ''}`} />
-        </span>
-        <BookOpen size={14} className="icon" />
-        <span className="label">{course.name}</span>
-        {assignments && <span className="count">{assignments.length}</span>}
-      </button>
+        />
+        <BookOpen />
+        <span>{course.name}</span>
+        {assignments && <span className="sidebar-count">{assignments.length}</span>}
+      </SidebarMenuButton>
       {expanded && (
-        <div className="assignment-list">
+        <SidebarMenuSub>
           {assignments === undefined ? (
-            <div className="skeleton-row" style={{ marginLeft: 4 }} />
+            <SidebarMenuSubItem><div className="skeleton-row" /></SidebarMenuSubItem>
           ) : (
             <>
               {assignments.map((assignment) => (
-                <div key={assignment.id} className="assignment-node">
-                  <button
-                    className={`assignment-row ${activeAssignmentId === assignment.id && !activeGroupId ? 'active' : ''}`}
+                <SidebarMenuSubItem key={assignment.id}>
+                  <SidebarMenuSubButton
+                    isActive={activeAssignmentId === assignment.id && !activeGroupId}
                     onClick={() => onSelectAssignment(assignment)}
                   >
-                    <span onClick={(e) => { e.stopPropagation(); onToggleAssignment(assignment.id) }} style={{ display: 'inline-flex' }}>
-                      <ChevronRight size={11} className={`chev ${expandedAssignments.has(assignment.id) ? 'open' : ''}`} />
-                    </span>
-                    <ClipboardList size={12} className="icon" />
-                    <span className="label">{assignment.name}</span>
-                    {groupsByAssignment[assignment.id] && <span className="count">{groupsByAssignment[assignment.id].length}</span>}
-                  </button>
+                    <ChevronRight
+                      className={`chev ${expandedAssignments.has(assignment.id) ? 'open' : ''}`}
+                      onClick={(e) => { e.stopPropagation(); onToggleAssignment(assignment.id) }}
+                    />
+                    <ClipboardList />
+                    <span>{assignment.name}</span>
+                    {groupsByAssignment[assignment.id] && <span className="sidebar-count">{groupsByAssignment[assignment.id].length}</span>}
+                  </SidebarMenuSubButton>
                   {expandedAssignments.has(assignment.id) && (
-                    <div className="group-list">
+                    <SidebarMenuSub>
                       {groupsByAssignment[assignment.id] === undefined ? (
-                        <div className="skeleton-row" style={{ marginLeft: 4 }} />
+                        <SidebarMenuSubItem><div className="skeleton-row" /></SidebarMenuSubItem>
                       ) : (
                         <>
                           {groupsByAssignment[assignment.id].map((g) => (
-                            <button
-                              key={g.id}
-                              className={`group-row ${activeGroupId === g.id ? 'active' : ''}`}
-                              onClick={() => onSelectGroup(assignment, g)}
-                            >
-                              <Users size={12} className="icon" />
-                              <span className="label">{g.name}</span>
-                            </button>
+                            <SidebarMenuSubItem key={g.id}>
+                              <SidebarMenuSubButton
+                                isActive={activeGroupId === g.id}
+                                onClick={() => onSelectGroup(assignment, g)}
+                              >
+                                <Users />
+                                <span>{g.name}</span>
+                              </SidebarMenuSubButton>
+                            </SidebarMenuSubItem>
                           ))}
                           {role === 'professor' && professorId && (
-                            <CreateGroupForm professorId={professorId} assignmentId={assignment.id} onCreated={() => onGroupCreated(assignment)} />
+                            <SidebarMenuSubItem>
+                              <CreateGroupForm professorId={professorId} assignmentId={assignment.id} onCreated={() => onGroupCreated(assignment)} />
+                            </SidebarMenuSubItem>
                           )}
                           {groupsByAssignment[assignment.id].length === 0 && role === 'student' && (
-                            <div style={{ padding: '6px 12px', fontSize: 12, color: 'var(--muted)' }}>No groups yet.</div>
+                            <SidebarMenuSubItem><div className="sidebar-empty compact">No groups yet.</div></SidebarMenuSubItem>
                           )}
                         </>
                       )}
-                    </div>
+                    </SidebarMenuSub>
                   )}
-                </div>
+                </SidebarMenuSubItem>
               ))}
               {role === 'professor' && professorId && (
-                <CreateAssignmentForm professorId={professorId} courseId={course.id} onCreated={onAssignmentCreated} />
+                <SidebarMenuSubItem>
+                  <CreateAssignmentForm professorId={professorId} courseId={course.id} onCreated={onAssignmentCreated} />
+                </SidebarMenuSubItem>
               )}
               {assignments.length === 0 && role === 'student' && (
-                <div style={{ padding: '6px 12px', fontSize: 12, color: 'var(--muted)' }}>No assignments yet.</div>
+                <SidebarMenuSubItem><div className="sidebar-empty compact">No assignments yet.</div></SidebarMenuSubItem>
               )}
             </>
           )}
-        </div>
+        </SidebarMenuSub>
       )}
-    </div>
+    </SidebarMenuItem>
   )
 }
 
@@ -1112,17 +1494,6 @@ function CourseCalendarView({ courseId, role, assignments, professorId, onSelect
     <>
       <div className="course-calendar-shell">
         <div className="course-calendar-main">
-          <div className="calendar-summary">
-            <div>
-              <h3>Course calendar</h3>
-              <p>
-                {role === 'professor'
-                  ? 'Scroll through the months, then click a day square to add something to that date.'
-                  : 'Scroll through the months, then click a day square to see everything due on that date.'}
-              </p>
-            </div>
-            {calendarLoading && <span className="calendar-status">Loading custom items…</span>}
-          </div>
 
           {showSkeleton ? (
             <div className="calendar-skeleton">
@@ -1215,8 +1586,8 @@ function CourseCalendarView({ courseId, role, assignments, professorId, onSelect
                       <article key={entry.id} className="calendar-entry-card">
                         <div className="calendar-entry-topline">
                           <div className="calendar-entry-badges">
-                            <span className={`calendar-kind-pill ${entry.kind}`}>{entry.kind === 'deadline' ? 'Deadline' : 'Event'}</span>
-                            <span className={`calendar-source-pill ${entry.source}`}>{entry.source === 'assignment' ? 'Assignment' : 'Course item'}</span>
+                            <Badge variant={entry.kind === 'deadline' ? 'accent' : 'success'} className={`calendar-kind-pill ${entry.kind}`}>{entry.kind === 'deadline' ? 'Deadline' : 'Event'}</Badge>
+                            <Badge variant="muted" className={`calendar-source-pill ${entry.source}`}>{entry.source === 'assignment' ? 'Assignment' : 'Course item'}</Badge>
                           </div>
                           <time dateTime={entry.dueAt} className="calendar-entry-time">{formatCalendarTime(entry.dueAt)}</time>
                         </div>
@@ -1229,30 +1600,32 @@ function CourseCalendarView({ courseId, role, assignments, professorId, onSelect
                           <span>{formatCalendarDateTime(entry.dueAt)}</span>
                           <div className="calendar-entry-actions">
                             {openAssignment && (
-                              <button type="button" className="btn btn-sm" onClick={() => onSelectAssignment(openAssignment)}>
+                              <Button type="button" variant="secondary" size="sm" onClick={() => onSelectAssignment(openAssignment)}>
                                 Open assignment
-                              </button>
+                              </Button>
                             )}
                             {entry.source === 'custom' && role === 'professor' && professorId && (
                               <>
-                                <button
+                                <Button
                                   type="button"
-                                  className="btn btn-sm"
+                                  variant="secondary"
+                                  size="sm"
                                   onClick={() => {
                                     const item = entry.itemId ? calendarItemMap.get(entry.itemId) : undefined
                                     if (item) startEditingItem(item)
                                   }}
                                 >
                                   Edit
-                                </button>
-                                <button
+                                </Button>
+                                <Button
                                   type="button"
-                                  className="btn btn-sm"
+                                  variant="danger"
+                                  size="sm"
                                   onClick={() => entry.itemId && deleteItem(entry.itemId)}
                                   disabled={deletingItemId === entry.itemId}
                                 >
                                   {deletingItemId === entry.itemId ? 'Deleting…' : 'Delete'}
-                                </button>
+                                </Button>
                               </>
                             )}
                           </div>
@@ -1274,18 +1647,18 @@ function CourseCalendarView({ courseId, role, assignments, professorId, onSelect
               <span className="calendar-editor-selected">{formatCalendarDay(selectedDayDate)}</span>
               <div className="calendar-editor-title-row">
                 <h3>{editingItemId ? 'Edit calendar item' : 'Add item to selected day'}</h3>
-                <button type="button" className="btn btn-sm" onClick={closeEditor}>Close</button>
+                <Button type="button" variant="secondary" size="sm" onClick={closeEditor}>Close</Button>
               </div>
               <p>Write what should appear on this day.</p>
             </div>
             <form className="calendar-item-form" onSubmit={saveItem}>
               <label>
                 <span>Title</span>
-                <input value={formTitle} onChange={(event) => setFormTitle(event.target.value)} placeholder="Midterm review session" required />
+                <Input value={formTitle} onChange={(event) => setFormTitle(event.target.value)} placeholder="Midterm review session" required />
               </label>
               <label>
                 <span>Kind</span>
-                <select
+                <Select
                   value={formKind}
                   onChange={(event) => {
                     const nextKind = event.target.value as CourseCalendarItem['kind']
@@ -1295,43 +1668,43 @@ function CourseCalendarView({ courseId, role, assignments, professorId, onSelect
                 >
                   <option value="deadline">Deadline</option>
                   <option value="event">Event</option>
-                </select>
+                </Select>
               </label>
               {formKind === 'deadline' && (
                 assignments && assignments.length > 0 ? (
                   <label>
                     <span>Assignment due</span>
-                    <select value={formAssignmentId} onChange={(event) => setFormAssignmentId(event.target.value)}>
+                    <Select value={formAssignmentId} onChange={(event) => setFormAssignmentId(event.target.value)}>
                       <option value="">General course deadline</option>
                       {assignments.map((assignment) => (
                         <option key={assignment.id} value={assignment.id}>{assignment.name}</option>
                       ))}
-                    </select>
+                    </Select>
                   </label>
                 ) : (
                   <label>
                     <span>Assignment due</span>
-                    <select value="" disabled>
+                    <Select value="" disabled>
                       <option>No assignments in this course yet</option>
-                    </select>
+                    </Select>
                   </label>
                 )
               )}
               <label>
                 <span>Date & time</span>
-                <input type="datetime-local" value={formDueAt} onChange={(event) => setFormDueAt(event.target.value)} required />
+                <Input type="datetime-local" value={formDueAt} onChange={(event) => setFormDueAt(event.target.value)} required />
               </label>
               <label>
                 <span>Description</span>
-                <textarea value={formDescription} onChange={(event) => setFormDescription(event.target.value)} placeholder="Optional details for students" rows={4} />
+                <Textarea value={formDescription} onChange={(event) => setFormDescription(event.target.value)} placeholder="Optional details for students" rows={4} />
               </label>
               <div className="calendar-form-actions">
-                <button type="submit" className="btn btn-sm btn-primary" disabled={savingItem}>
+                <Button type="submit" variant="primary" size="sm" disabled={savingItem}>
                   {savingItem ? 'Saving…' : editingItemId ? 'Save changes' : 'Add item'}
-                </button>
-                <button type="button" className="btn btn-sm" onClick={closeEditor} disabled={savingItem}>
+                </Button>
+                <Button type="button" variant="secondary" size="sm" onClick={closeEditor} disabled={savingItem}>
                   Cancel
-                </button>
+                </Button>
               </div>
             </form>
           </div>
@@ -1340,6 +1713,8 @@ function CourseCalendarView({ courseId, role, assignments, professorId, onSelect
     </>
   )
 }
+
+type ImportedStudentCredential = User & { temporaryPassword?: string; studentId?: string | null; email?: string | null }
 
 function CourseDetail({
   course, role, assignments, groupsByAssignment, onSelectAssignment, onAssignmentCreated, professorId,
@@ -1354,6 +1729,7 @@ function CourseDetail({
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [importingCsv, setImportingCsv] = useState(false)
+  const [importedCredentials, setImportedCredentials] = useState<ImportedStudentCredential[]>([])
   const [tab, setTab] = useState<CourseCalendarTab>('calendar')
   const [courseMembers, setCourseMembers] = useState<Member[] | null>(null)
   const [membersRefreshKey, setMembersRefreshKey] = useState(0)
@@ -1361,6 +1737,7 @@ function CourseDetail({
 
   useEffect(() => {
     setTab('calendar')
+    setImportedCredentials([])
     setCourseMembers(null)
     setMembersRefreshKey(0)
   }, [course.id])
@@ -1395,12 +1772,16 @@ function CourseDetail({
     try {
       setImportingCsv(true)
       const csv = await file.text()
-      const result = await api<{ importedStudents: number }>(`/courses/${course.id}/import-students`, {
+      const result = await api<{ importedStudents: number; students: ImportedStudentCredential[] }>(`/courses/${course.id}/import-students`, {
         method: 'POST',
         body: JSON.stringify({ professorId, csv }),
       })
+      const credentials = result.students.filter((student) => student.temporaryPassword)
+      setImportedCredentials(credentials)
       setMembersRefreshKey((value) => value + 1)
-      toast.success(`Imported ${result.importedStudents} students`)
+      toast.success(credentials.length > 0
+        ? `Imported ${result.importedStudents} students. ${credentials.length} temporary passwords generated.`
+        : `Imported ${result.importedStudents} students`)
       setTab('students')
     } catch (err) {
       showError(err, 'Could not import student CSV')
@@ -1411,9 +1792,14 @@ function CourseDetail({
 
   return (
     <>
-      <div className="detail-header compact">
+      <div className="detail-header compact course-hero">
         <div className="detail-title-row">
           <div className="title-block">
+            {role === 'professor' && course.joinCode && (
+              <Badge variant="accent" className="course-tag" title={course.joinCode}>
+                <BookOpen size={11} /> Join code {course.joinCode}
+              </Badge>
+            )}
             <h2>{course.name}</h2>
             <span className="meta-inline">
               <ClipboardList size={11} /> {assignments === undefined ? 'Loading assignments…' : `${assignmentCount} ${assignmentCount === 1 ? 'assignment' : 'assignments'}`}
@@ -1426,19 +1812,21 @@ function CourseDetail({
             </span>
           </div>
           <div className="detail-actions">
-            <div className="tabs" aria-label="Course detail tabs">
-              <button type="button" className={tab === 'calendar' ? 'active' : ''} onClick={() => setTab('calendar')}>
-                <CalendarDays size={13} /> Calendar
-              </button>
-              <button type="button" className={tab === 'assignments' ? 'active' : ''} onClick={() => setTab('assignments')}>
-                <ClipboardList size={13} /> Assignments
-              </button>
-              {role === 'professor' && (
-                <button type="button" className={tab === 'students' ? 'active' : ''} onClick={() => setTab('students')}>
-                  <Users size={13} /> Students
-                </button>
-              )}
-            </div>
+            <Tabs aria-label="Course detail tabs">
+              <TabsList>
+                <TabsTrigger active={tab === 'calendar'} onClick={() => setTab('calendar')}>
+                  <CalendarDays size={13} /> Calendar
+                </TabsTrigger>
+                <TabsTrigger active={tab === 'assignments'} onClick={() => setTab('assignments')}>
+                  <ClipboardList size={13} /> Assignments
+                </TabsTrigger>
+                {role === 'professor' && (
+                  <TabsTrigger active={tab === 'students'} onClick={() => setTab('students')}>
+                    <Users size={13} /> Students
+                  </TabsTrigger>
+                )}
+              </TabsList>
+            </Tabs>
             {role === 'professor' && (
               <>
                 <input
@@ -1448,22 +1836,26 @@ function CourseDetail({
                   onChange={importStudents}
                   style={{ display: 'none' }}
                 />
-                <button
+                <Button
                   type="button"
-                  className="btn btn-sm"
+                  variant="secondary"
+                  size="sm"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={importingCsv}
                 >
                   {importingCsv ? 'Importing…' : 'Import CSV'}
-                </button>
+                </Button>
+                <Button type="button" variant="ghost" size="sm" onClick={() => window.open('/students.example.csv', '_blank', 'noopener,noreferrer')}>
+                  Example CSV
+                </Button>
+                {course.joinCode && <CopyChip label="Join code" value={course.joinCode} accent />}
               </>
             )}
-            <CopyChip label="Join code" value={course.joinCode} accent />
           </div>
         </div>
       </div>
       {role === 'professor' && tab === 'students' ? (
-        <CourseStudentsView courseMembers={courseMembers} />
+        <CourseStudentsView courseMembers={courseMembers} importedCredentials={importedCredentials} />
       ) : tab === 'calendar' ? (
         <div className="tab-body">
           <CourseCalendarView
@@ -1475,7 +1867,7 @@ function CourseDetail({
           />
         </div>
       ) : (
-        <div className="tab-body" style={{ padding: 20 }}>
+        <div className="tab-body course-resource-panel">
           {assignments === undefined ? (
             <>
               <div className="skeleton-row" />
@@ -1483,41 +1875,39 @@ function CourseDetail({
               <div className="skeleton-row" style={{ width: '88%' }} />
             </>
           ) : assignments.length === 0 ? (
-            <div className="detail-empty" style={{ height: 'auto', padding: 40 }}>
-              <div className="icon-circle"><ClipboardList size={22} /></div>
-              <h3>No assignments yet</h3>
-              <p>{role === 'professor' ? 'Create an assignment from the sidebar to get started.' : 'No assignments have been posted in this course yet.'}</p>
+            <CardContent className="detail-empty compact-empty">
+              <EmptyState
+                icon={<ClipboardList size={24} />}
+                title="No assignments yet"
+                description={role === 'professor' ? 'Create an assignment from the sidebar to get started.' : 'No assignments have been posted in this course yet.'}
+              />
               {role === 'professor' && professorId && (
-                <div style={{ marginTop: 16 }}>
+                <div className="empty-action">
                   <CreateAssignmentForm professorId={professorId} courseId={course.id} onCreated={onAssignmentCreated} />
                 </div>
               )}
-            </div>
+            </CardContent>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
+            <div className="resource-grid">
               {assignments.map((assignment) => {
                 const groupCount = groupsByAssignment[assignment.id]?.length ?? 0
                 return (
                   <button
                     key={assignment.id}
+                    className="resource-card assignment-card"
                     onClick={() => onSelectAssignment(assignment)}
-                    style={{
-                      display: 'grid', gap: 8, padding: 14, textAlign: 'left',
-                      background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 10,
-                    }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <ClipboardList size={14} style={{ color: 'var(--accent)' }} />
-                      <strong style={{ fontWeight: 600 }}>{assignment.name}</strong>
-                    </div>
-                    <span style={{ color: 'var(--muted)', fontSize: 12 }}>
-                      {groupCount} {groupCount === 1 ? 'group' : 'groups'}
+                    <span className="resource-card-icon"><ClipboardList size={15} /></span>
+                    <span className="resource-card-main">
+                      <strong>{assignment.name}</strong>
+                      <small>{groupCount} {groupCount === 1 ? 'group' : 'groups'}</small>
                     </span>
                     {assignment.dueDate && (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--muted)', fontSize: 12 }}>
-                        <CalendarDays size={12} style={{ color: 'var(--accent-2)' }} /> {formatCalendarDateTime(assignment.dueDate)}
-                      </span>
+                      <Badge variant="muted" className="resource-card-date">
+                        <CalendarDays size={12} /> {formatCalendarDateTime(assignment.dueDate)}
+                      </Badge>
                     )}
+                    <ArrowUpRight size={14} className="resource-card-arrow" />
                   </button>
                 )
               })}
@@ -1528,8 +1918,27 @@ function CourseDetail({
     </>
   )
 }
+function CourseStudentsView({ courseMembers, importedCredentials }: { courseMembers: Member[] | null; importedCredentials: ImportedStudentCredential[] }) {
+  const credentialsPanel = importedCredentials.length > 0 && (
+    <section className="student-temp-passwords">
+      <div className="student-temp-passwords-head">
+        <div>
+          <h3>Student usernames and temporary passwords</h3>
+          <p>Share these once. The username and starting password are the same.</p>
+        </div>
+        <Badge variant="accent">{importedCredentials.length}</Badge>
+      </div>
+      <div className="student-temp-password-list">
+        {importedCredentials.map((student) => (
+          <div key={student.id} className="student-temp-password-row">
+            <span>{student.displayName}</span>
+            <code>{student.temporaryPassword}</code>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
 
-function CourseStudentsView({ courseMembers }: { courseMembers: Member[] | null }) {
   if (courseMembers === null) {
     return (
       <div className="students-panel">
@@ -1542,25 +1951,32 @@ function CourseStudentsView({ courseMembers }: { courseMembers: Member[] | null 
 
   if (courseMembers.length === 0) {
     return (
-      <div className="detail-empty">
-        <div className="icon-circle"><Users size={22} /></div>
-        <h3>No students in this course</h3>
-        <p>Students will appear here after they join the course or you import a CSV.</p>
-      </div>
+      <CardContent className="detail-empty students-empty-with-credentials">
+        <EmptyState
+          icon={<Users size={24} />}
+          title="No students in this course"
+          description="Students will appear here after they join the course or you import a CSV."
+        />
+        {credentialsPanel}
+      </CardContent>
     )
   }
 
   return (
     <div className="students-panel">
+      {credentialsPanel}
       <section className="student-section">
         <div className="student-section-header">
-          <h3>Course students</h3>
-          <span>{courseMembers.length}</span>
+          <div>
+            <h3>Course students</h3>
+            <p>{courseMembers.length} enrolled {courseMembers.length === 1 ? 'student' : 'students'}</p>
+          </div>
+          <Badge variant="muted">{courseMembers.length}</Badge>
         </div>
         <div className="student-list compact">
           {courseMembers.map((student) => (
             <div className="student-row" key={student.userId}>
-              <div className="student-avatar">{initials(student.username ?? student.displayName)}</div>
+              <Avatar className="student-avatar" fallback={initials(student.username ?? student.displayName)} style={studentAvatarStyle(student)} />
               <div className="student-main">
                 <span className="student-name">{student.username ?? student.displayName}</span>
                 <span className="student-meta">{student.displayName}</span>
@@ -1584,12 +2000,36 @@ function AssignmentDetail({
   onGroupCreated: () => void
   professorId?: string
 }) {
+  const groupCsvInputRef = useRef<HTMLInputElement | null>(null)
+  const [importingGroups, setImportingGroups] = useState(false)
+
+  const importGroups = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || !professorId) return
+
+    try {
+      setImportingGroups(true)
+      const csv = await file.text()
+      const result = await api<{ importedGroups: number }>(`/assignments/${assignment.id}/import-groups`, {
+        method: 'POST',
+        body: JSON.stringify({ professorId, csv }),
+      })
+      toast.success(`Imported ${result.importedGroups} ${result.importedGroups === 1 ? 'group' : 'groups'}`)
+      onGroupCreated()
+    } catch (err) {
+      showError(err, 'Could not import group CSV')
+    } finally {
+      setImportingGroups(false)
+    }
+  }
+
   return (
     <>
-      <div className="detail-header compact">
+      <div className="detail-header compact course-hero">
         <div className="detail-title-row">
           <div className="title-block">
-            <span className="course-tag" title={course.name}><BookOpen size={11} /> {course.name}</span>
+            <Badge variant="accent" className="course-tag" title={course.name}><BookOpen size={11} /> {course.name}</Badge>
             <h2>{assignment.name}</h2>
             <span className="meta-inline">
               <Users size={11} /> {groups.length} {groups.length === 1 ? 'group' : 'groups'}
@@ -1601,36 +2041,59 @@ function AssignmentDetail({
               )}
             </span>
           </div>
+          {role === 'professor' && professorId && (
+            <div className="detail-actions">
+              <input
+                ref={groupCsvInputRef}
+                type="file"
+                accept=".csv,text/csv"
+                onChange={importGroups}
+                style={{ display: 'none' }}
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => groupCsvInputRef.current?.click()}
+                disabled={importingGroups}
+              >
+                {importingGroups ? 'Importing…' : 'Import Groups CSV'}
+              </Button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => window.open('/groups.example.csv', '_blank', 'noopener,noreferrer')}>
+                Example CSV
+              </Button>
+            </div>
+          )}
         </div>
       </div>
-      <div style={{ overflow: 'auto', padding: 20 }}>
+      <div className="tab-body course-resource-panel">
         {groups.length === 0 ? (
-          <div className="detail-empty" style={{ height: 'auto', padding: 40 }}>
-            <div className="icon-circle"><Users size={22} /></div>
-            <h3>No groups yet</h3>
-            <p>{role === 'professor' ? 'Create a group for this assignment from the sidebar.' : 'You have not joined a group for this assignment yet.'}</p>
+          <CardContent className="detail-empty compact-empty">
+            <EmptyState
+              icon={<Users size={24} />}
+              title="No groups yet"
+              description={role === 'professor' ? 'Create a group for this assignment from the sidebar or import a group CSV.' : 'You have not joined a group for this assignment yet.'}
+            />
             {role === 'professor' && professorId && (
-              <div style={{ marginTop: 16 }}>
+              <div className="empty-action">
                 <CreateGroupForm professorId={professorId} assignmentId={assignment.id} onCreated={onGroupCreated} />
               </div>
             )}
-          </div>
+          </CardContent>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10 }}>
+          <div className="resource-grid">
             {groups.map((g) => (
               <button
                 key={g.id}
+                className="resource-card group-resource-card"
                 onClick={() => onSelectGroup(g)}
-                style={{
-                  display: 'grid', gap: 8, padding: 14, textAlign: 'left',
-                  background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 10,
-                }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Users size={14} style={{ color: 'var(--accent)' }} />
-                  <strong style={{ fontWeight: 600 }}>{g.name}</strong>
-                </div>
-                <span style={{ color: 'var(--muted)', fontSize: 12 }}>Open group dashboard, files & history</span>
+                <span className="resource-card-icon"><Users size={15} /></span>
+                <span className="resource-card-main">
+                  <strong>{g.name}</strong>
+                  <small>Open group dashboard, files, and history</small>
+                </span>
+                <ArrowUpRight size={14} className="resource-card-arrow" />
               </button>
             ))}
           </div>
@@ -1658,9 +2121,9 @@ function CopyChip({ label, value, accent, mono }: { label: string; value: string
     <span className={`chip ${accent ? 'accent' : ''} ${mono ? 'code' : ''}`}>
       <span>{label}:</span>
       <strong style={{ maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</strong>
-      <button className={`copy-btn ${copied ? 'copied' : ''}`} onClick={copy} title="Copy">
+      <Button className={`copy-btn ${copied ? 'copied' : ''}`} variant="ghost" size="sm" onClick={copy} title="Copy">
         {copied ? <Check size={11} /> : <Copy size={11} />}
-      </button>
+      </Button>
     </span>
   )
 }

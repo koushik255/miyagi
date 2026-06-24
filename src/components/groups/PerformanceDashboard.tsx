@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, FileText, GitCommit, TrendingDown, TrendingUp, Trophy, Users } from 'lucide-react'
+import { AlertTriangle, ExternalLink, GitCommit, TrendingDown, TrendingUp, Trophy, Users } from 'lucide-react'
+import { studentAvatarStyle } from '../../avatar'
 import { api } from '../../api'
 import { initials } from '../../format'
 import type { ActivityCommit, ActivityDashboard, Period, StudentActivity } from '../../types'
+import { Avatar, Button, Tabs, TabsList, TabsTrigger } from '../ui'
 
 export function PerformanceDashboard({
   kind,
@@ -76,32 +78,13 @@ export function PerformanceDashboard({
 
   if (selectedStudent && canInspectStudents) {
     return (
-      <div className="analytics-page">
-        <div className="analytics-toolbar student-commit-page-toolbar">
-          <div className="student-commit-page-title">
-            <button type="button" className="btn btn-sm" onClick={() => setSelectedStudentId(null)}>← All students</button>
-            <div className="contributor-avatar">{initials(selectedStudentName)}</div>
-            <div>
-              <h3>{selectedStudentName}</h3>
-              <p>{selectedStudentCommits.length} {selectedStudentCommits.length === 1 ? 'commit' : 'commits'} matched to this student's GitHub name {periodLabel}.</p>
-            </div>
-          </div>
-          <div className="analytics-controls">
-            {showFetchLatest && (
-              <button className="btn btn-sm" onClick={handleFetchLatest} disabled={refreshing}>
-                {refreshing ? 'Fetching…' : 'Fetch latest'}
-              </button>
-            )}
-            <div className="period-tabs">
-              {(['weekly', 'monthly', 'semester'] as Period[]).map((nextPeriod) => (
-                <button key={nextPeriod} className={period === nextPeriod ? 'active' : ''} onClick={() => setPeriod(nextPeriod)}>
-                  {nextPeriod}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-        <StudentCommitPage commits={selectedStudentCommits} periodLabel={periodLabel} />
+      <div className="analytics-page student-activity-detail-page">
+        <StudentCommitPage
+          commits={selectedStudentCommits}
+          periodLabel={periodLabel}
+          studentName={selectedStudentName}
+          onBack={() => setSelectedStudentId(null)}
+        />
       </div>
     )
   }
@@ -115,27 +98,27 @@ export function PerformanceDashboard({
         </div>
         <div className="analytics-controls">
           {showFetchLatest && (
-            <button className="btn btn-sm" onClick={handleFetchLatest} disabled={refreshing}>
+            <Button variant="secondary" size="sm" onClick={handleFetchLatest} disabled={refreshing}>
               {refreshing ? 'Fetching…' : 'Fetch latest'}
-            </button>
+            </Button>
           )}
-          <div className="period-tabs">
-            {(['weekly', 'monthly', 'semester'] as Period[]).map((nextPeriod) => (
-              <button key={nextPeriod} className={period === nextPeriod ? 'active' : ''} onClick={() => setPeriod(nextPeriod)}>
-                {nextPeriod}
-              </button>
-            ))}
-          </div>
+          <Tabs className="period-tabs" aria-label="Dashboard period">
+            <TabsList>
+              {(['weekly', 'monthly', 'semester'] as Period[]).map((nextPeriod) => (
+                <TabsTrigger key={nextPeriod} active={period === nextPeriod} onClick={() => setPeriod(nextPeriod)}>
+                  {nextPeriod}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
         </div>
       </div>
 
       <div className="metric-grid">
-        <Metric icon={<Users size={15} />} label="Students" value={data.totals.students} />
         {'groups' in data.totals && <Metric icon={<Users size={15} />} label="Groups" value={data.totals.groups ?? 0} />}
         <Metric icon={<GitCommit size={15} />} label="Commits" value={data.totals.commits} />
         <Metric icon={<TrendingUp size={15} />} label="Additions" value={data.totals.additions} tone="positive" prefix="+" />
         <Metric icon={<TrendingDown size={15} />} label="Deletions" value={data.totals.deletions} tone="negative" prefix="-" />
-        <Metric icon={<FileText size={15} />} label="Files changed" value={data.totals.changedFiles} />
       </div>
 
       <div className="analytics-grid">
@@ -229,7 +212,7 @@ function TopPerformersWidget({ students, periodLabel }: { students: StudentActiv
             return (
               <article className="top-performer-row" key={student.userId}>
                 <span className={`top-performer-rank rank-${index + 1}`}>#{index + 1}</span>
-                <div className="contributor-avatar">{initials(name)}</div>
+                <Avatar className="contributor-avatar" fallback={initials(name)} style={studentAvatarStyle(student)} />
                 <div className="top-performer-main">
                   <strong>{name}</strong>
                   {secondaryName && <span>{secondaryName}</span>}
@@ -271,30 +254,21 @@ function ContributorCard({
   const latestActivity = latestActiveBucket(student)
   const hasActivity = student.commits > 0 || student.additions > 0 || student.deletions > 0 || student.changedFiles > 0
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
-    if (!inspectable || (event.key !== 'Enter' && event.key !== ' ')) return
-    event.preventDefault()
-    onInspect()
-  }
+  const inspectButtonLabel = selected ? 'Open commits' : 'View commits'
 
   return (
     <article
       className={`contributor-card student-summary-card${hasActivity ? '' : ' inactive'}${inspectable ? ' inspectable' : ''}${selected ? ' selected' : ''}`}
-      role={inspectable ? 'button' : undefined}
-      tabIndex={inspectable ? 0 : undefined}
-      onClick={inspectable ? onInspect : undefined}
-      onKeyDown={handleKeyDown}
-      aria-pressed={inspectable ? selected : undefined}
     >
       <div className="contributor-head">
         <div className="contributor-identity" title={contributorTitle}>
-          <div className="contributor-avatar">{initials(primaryName)}</div>
+          <Avatar className="contributor-avatar" fallback={initials(primaryName)} style={studentAvatarStyle(student)} />
           <div>
             <strong>{primaryName}</strong>
             {secondaryName && <span>{secondaryName}</span>}
           </div>
         </div>
-        <span className="contributor-rank">{inspectable ? (selected ? 'Open' : 'View commits') : `#${rank}`}</span>
+        <span className="contributor-rank">#{rank}</span>
       </div>
 
       <div className="student-change-callout">
@@ -311,34 +285,69 @@ function ContributorCard({
         <span className="rank-stat-negative">{formatSignedStat(student.deletions, '-')} deletions</span>
         <span>{pluralize(student.changedFiles, 'file')} changed</span>
       </div>
+
+      {inspectable && (
+        <div className="student-card-actions">
+          <Button variant="secondary" size="sm" onClick={onInspect} aria-pressed={selected}>
+            {inspectButtonLabel}
+          </Button>
+        </div>
+      )}
     </article>
   )
 }
 
-function StudentCommitPage({ commits, periodLabel }: { commits: ActivityCommit[]; periodLabel: string }) {
+function StudentCommitPage({
+  commits,
+  periodLabel,
+  studentName,
+  onBack,
+}: {
+  commits: ActivityCommit[]
+  periodLabel: string
+  studentName: string
+  onBack: () => void
+}) {
   return (
-    <section className="analytics-card span-2 student-commit-page">
-      <div className="card-head">
+    <section className="analytics-card student-commit-page">
+      <div className="card-head student-commit-page-head">
         <div>
-          <h4>Commits {periodLabel}</h4>
-          <span>Only commits matched to the selected student's linked GitHub name are shown.</span>
+          <h4>Commit activity</h4>
+          <span>{studentName} · matched commits {periodLabel}.</span>
         </div>
-        <span>{commits.length}</span>
+        <div className="student-commit-page-actions">
+          <span>{commits.length}</span>
+          <Button variant="secondary" size="sm" onClick={onBack}>← All students</Button>
+        </div>
       </div>
 
       {commits.length === 0 ? (
         <div className="dash-empty">No commits matched this student {periodLabel}.</div>
       ) : (
         <div className="student-commit-list page-list">
+          <div className="student-commit-list-header" aria-hidden="true">
+            <span>Commit</span>
+            <span>Hash</span>
+            <span>Changes</span>
+            <span>Link</span>
+          </div>
           {commits.map((commit) => (
             <div className="student-commit-row" key={commit.hash}>
               <GitCommit size={15} />
-              <div>
+              <div className="student-commit-main">
                 <strong>{commit.message.split('\n')[0]}</strong>
                 <span>{commit.githubUsername ?? commit.matchedStudent?.githubUsername ?? commit.authorName} · {commit.groupName ?? 'repo'} · {formatActivityTime(commit.when)}</span>
               </div>
               <span className="hash">{commit.hash.slice(0, 7)}</span>
               <span className="code-chip diff-chip"><span className="diff-positive">{formatSignedStat(commit.additions, '+')}</span><span className="diff-negative">{formatSignedStat(commit.deletions, '-')}</span></span>
+              {commit.htmlUrl ? (
+                <a className="ui-button ui-button-secondary ui-button-sm commit-link" href={commit.htmlUrl} target="_blank" rel="noreferrer" aria-label={`Open commit ${commit.hash.slice(0, 7)}`}>
+                  <ExternalLink size={12} />
+                  Open
+                </a>
+              ) : (
+                <span className="commit-link-placeholder">—</span>
+              )}
             </div>
           ))}
         </div>

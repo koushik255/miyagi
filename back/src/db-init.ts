@@ -8,6 +8,7 @@ const CREATE_TABLE_STATEMENTS = [
     email TEXT UNIQUE,
     student_id TEXT UNIQUE,
     github_username TEXT,
+    avatar_color TEXT,
     password TEXT,
     created_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL
@@ -15,8 +16,21 @@ const CREATE_TABLE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS professors (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL UNIQUE,
+    page_slug TEXT NOT NULL UNIQUE,
+    page_title TEXT NOT NULL,
     created_at TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS professor_github_accounts (
+    professor_id TEXT PRIMARY KEY,
+    github_user_id TEXT NOT NULL UNIQUE,
+    github_username TEXT NOT NULL,
+    access_token TEXT NOT NULL,
+    token_type TEXT,
+    scope TEXT,
+    connected_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (professor_id) REFERENCES professors(id) ON DELETE CASCADE
   )`,
   `CREATE TABLE IF NOT EXISTS courses (
     id TEXT PRIMARY KEY,
@@ -89,6 +103,7 @@ const CREATE_TABLE_STATEMENTS = [
     group_id TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'student',
     github_username TEXT,
+    moved_from_group_id TEXT,
     joined_at TEXT NOT NULL,
     UNIQUE (user_id, group_id),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -168,6 +183,11 @@ const MIGRATIONS: Record<string, Record<string, string>> = {
     email: "ALTER TABLE users ADD COLUMN email TEXT",
     student_id: "ALTER TABLE users ADD COLUMN student_id TEXT",
     github_username: "ALTER TABLE users ADD COLUMN github_username TEXT",
+    avatar_color: "ALTER TABLE users ADD COLUMN avatar_color TEXT",
+  },
+  professors: {
+    page_slug: "ALTER TABLE professors ADD COLUMN page_slug TEXT",
+    page_title: "ALTER TABLE professors ADD COLUMN page_title TEXT",
   },
   assignments: {
     repository_mode: "ALTER TABLE assignments ADD COLUMN repository_mode TEXT NOT NULL DEFAULT 'github'",
@@ -188,6 +208,7 @@ const MIGRATIONS: Record<string, Record<string, string>> = {
   },
   group_members: {
     github_username: "ALTER TABLE group_members ADD COLUMN github_username TEXT",
+    moved_from_group_id: "ALTER TABLE group_members ADD COLUMN moved_from_group_id TEXT",
   },
   commit_activities: {
     github_username: "ALTER TABLE commit_activities ADD COLUMN github_username TEXT",
@@ -208,5 +229,37 @@ export function initDatabase() {
     }
   }
 
-  sqlite.run("UPDATE users SET password = device_hash WHERE password LIKE 'pbkdf2$%'");
+  hydrateProfessorPages();
+  sqlite.run("CREATE UNIQUE INDEX IF NOT EXISTS professors_page_slug_unique ON professors(page_slug)");
+}
+
+function hydrateProfessorPages() {
+  const rows = sqlite.query(`
+    SELECT professors.id, professors.page_slug AS pageSlug, professors.page_title AS pageTitle, users.display_name AS displayName, users.device_hash AS username
+    FROM professors
+    INNER JOIN users ON users.id = professors.user_id
+  `).all() as Array<{ id: string; pageSlug: string | null; pageTitle: string | null; displayName: string; username: string }>;
+
+  const used = new Set<string>();
+  for (const row of rows) {
+    const pageTitle = row.pageTitle || `${row.displayName}'s courses`;
+    const pageSlug = row.pageSlug || uniqueSlug(row.displayName || row.username, used);
+    used.add(pageSlug);
+    sqlite.run("UPDATE professors SET page_slug = ?, page_title = ? WHERE id = ?", [pageSlug, pageTitle, row.id]);
+  }
+}
+
+function uniqueSlug(value: string, used: Set<string>) {
+  const base = slugify(value) || "professor";
+  let slug = base;
+  let suffix = 2;
+  while (used.has(slug)) {
+    slug = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  return slug;
+}
+
+function slugify(value: string) {
+  return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }

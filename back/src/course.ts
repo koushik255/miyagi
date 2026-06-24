@@ -69,7 +69,6 @@ export const Course = {
       .select({
         id: courses.id,
         name: courses.name,
-        joinCode: courses.joinCode,
         professorId: courses.professorId,
         createdAt: courses.createdAt,
         role: courseMembers.role,
@@ -88,6 +87,8 @@ export const Course = {
         userId: users.id,
         username: users.deviceHash,
         displayName: users.displayName,
+        email: users.email,
+        avatarColor: users.avatarColor,
         role: courseMembers.role,
         joinedAt: courseMembers.joinedAt,
       })

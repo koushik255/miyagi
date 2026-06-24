@@ -101,6 +101,7 @@ group_workspaces/
 group_repos/
 back/group_workspaces/
 back/group_repos/
+back/fixture-data/
 
 # OpenTUI / Tree-sitter parser caches
 .tree-sitter/
