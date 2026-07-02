@@ -8,6 +8,7 @@ import { registerAssignmentRoutes } from "./routes/assignments";
 import { registerCourseRoutes } from "./routes/courses";
 import { registerGroupRoutes } from "./routes/groups";
 import { registerProjectRoutes } from "./routes/projects";
+import { registerWorkItemRoutes } from "./routes/work-items";
 import { registerUserRoutes } from "./routes/users";
 
 initDatabase();
@@ -27,6 +28,7 @@ registerCourseRoutes(app);
 registerAssignmentRoutes(app);
 registerGroupRoutes(app);
 registerProjectRoutes(app);
+registerWorkItemRoutes(app);
 
 app.use("/*", serveStatic({ root: frontendDist }));
 app.get("*", async (c) => {

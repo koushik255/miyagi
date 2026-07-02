@@ -7,6 +7,7 @@ export const users = sqliteTable("users", {
   displayName: text("display_name").notNull(),
   email: text("email").unique(),
   studentId: text("student_id").unique(),
+  githubUserId: text("github_user_id").unique(),
   githubUsername: text("github_username"),
   avatarColor: text("avatar_color"),
   password: text("password"),
@@ -37,6 +38,19 @@ export const professorGithubAccounts = sqliteTable("professor_github_accounts", 
   connectedAt: text("connected_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });
+export const userGithubAccounts = sqliteTable("user_github_accounts", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  githubUserId: text("github_user_id").notNull().unique(),
+  githubUsername: text("github_username").notNull(),
+  accessToken: text("access_token").notNull(),
+  tokenType: text("token_type"),
+  scope: text("scope"),
+  connectedAt: text("connected_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
 
 export const courses = sqliteTable("courses", {
   id: text("id").primaryKey(),
@@ -110,6 +124,7 @@ export const groups = sqliteTable("groups", {
   githubRepoUrl: text("github_repo_url"),
   githubOwner: text("github_owner"),
   githubRepo: text("github_repo"),
+  githubAccessUserId: text("github_access_user_id").references(() => users.id, { onDelete: "set null" }),
   professorId: text("professor_id")
     .notNull()
     .references(() => professors.id, { onDelete: "cascade" }),
@@ -133,6 +148,40 @@ export const groupMembers = sqliteTable(
   },
   (table) => [uniqueIndex("group_members_user_group_unique").on(table.userId, table.groupId)],
 );
+export const groupWorkItems = sqliteTable("group_work_items", {
+  id: text("id").primaryKey(),
+  groupId: text("group_id")
+    .notNull()
+    .references(() => groups.id, { onDelete: "cascade" }),
+  assignmentId: text("assignment_id").references(() => assignments.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  description: text("description").notNull().default(""),
+  assignedUserId: text("assigned_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  status: text("status").notNull().default("assigned"),
+  completionComment: text("completion_comment"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+  startedAt: text("started_at"),
+  completedAt: text("completed_at"),
+});
+
+export const groupWorkItemEvents = sqliteTable("group_work_item_events", {
+  id: text("id").primaryKey(),
+  workItemId: text("work_item_id")
+    .notNull()
+    .references(() => groupWorkItems.id, { onDelete: "cascade" }),
+  groupId: text("group_id")
+    .notNull()
+    .references(() => groups.id, { onDelete: "cascade" }),
+  actorUserId: text("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+  action: text("action").notNull(),
+  fromStatus: text("from_status"),
+  toStatus: text("to_status"),
+  comment: text("comment"),
+  occurredAt: text("occurred_at").notNull(),
+});
+
 
 export const projects = sqliteTable("projects", {
   id: text("id").primaryKey(),

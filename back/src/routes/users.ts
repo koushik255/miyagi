@@ -1,7 +1,8 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Hono } from "hono";
-import { notFound, unauthorized } from "../errors";
+import { forbidden, notFound, unauthorized } from "../errors";
 import { Course } from "../course";
+import { listGithubRepositories } from "../github";
 import { Professor, type GithubOAuthProfile } from "../professor";
 import { User, type PublicUser } from "../user";
 
@@ -12,8 +13,16 @@ function professorSession(professor: ReturnType<typeof Professor.createForUser>,
 }
 
 type GithubOAuthState = {
-  professorId: string;
+  professorId?: string;
+  userId?: string;
   returnTo: string;
+  expiresAt: number;
+  nonce: string;
+};
+
+type StudentGithubLoginToken = {
+  role: "student";
+  userId: string;
   expiresAt: number;
   nonce: string;
 };
@@ -36,8 +45,12 @@ function githubOAuthConfig() {
   return {
     clientId: process.env.GITHUB_OAUTH_CLIENT_ID,
     clientSecret: process.env.GITHUB_OAUTH_CLIENT_SECRET,
-    redirectUri: process.env.GITHUB_OAUTH_REDIRECT_URI,
-    scopes: process.env.GITHUB_OAUTH_SCOPES ?? "read:user repo",
+    professorRedirectUri: process.env.GITHUB_OAUTH_REDIRECT_URI,
+    studentRedirectUri: process.env.GITHUB_STUDENT_OAUTH_REDIRECT_URI
+      ?? process.env.GITHUB_OAUTH_STUDENT_REDIRECT_URI
+      ?? process.env.GITHUB_OAUTH_REDIRECT_URI?.replace("/auth/professor/github/callback", "/auth/student/github/callback"),
+    professorScopes: process.env.GITHUB_OAUTH_SCOPES ?? "read:user repo",
+    studentScopes: process.env.GITHUB_STUDENT_OAUTH_SCOPES ?? process.env.GITHUB_OAUTH_STUDENT_SCOPES ?? "read:user repo",
     stateSecret: process.env.GITHUB_OAUTH_STATE_SECRET ?? process.env.GITHUB_OAUTH_CLIENT_SECRET ?? "miyagi-dev-oauth-state",
   };
 }
@@ -60,7 +73,7 @@ function timingSafeStringEqual(left: string, right: string) {
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-function createGithubState(input: Pick<GithubOAuthState, "professorId" | "returnTo">, secret: string) {
+function createGithubState(input: Pick<GithubOAuthState, "professorId" | "userId" | "returnTo">, secret: string) {
   const payload: GithubOAuthState = {
     ...input,
     expiresAt: Date.now() + 10 * 60_000,
@@ -75,7 +88,7 @@ function verifyGithubState(state: string, secret: string): GithubOAuthState | un
   if (!encoded || !signature) return undefined;
   if (!timingSafeStringEqual(signPayload(encoded, secret), signature)) return undefined;
   const payload = JSON.parse(fromBase64Url(encoded)) as GithubOAuthState;
-  if (!payload.professorId || !payload.returnTo || !payload.expiresAt || payload.expiresAt < Date.now()) return undefined;
+  if (!payload.returnTo || !payload.expiresAt || payload.expiresAt < Date.now()) return undefined;
   return payload;
 }
 
@@ -85,8 +98,16 @@ function safeReturnPath(value: string | undefined): string {
 }
 
 function withOauthResult(returnTo: string, result: string) {
-  const separator = returnTo.includes("?") ? "&" : "?";
-  return `${returnTo}${separator}github_oauth=${encodeURIComponent(result)}`;
+  return withOauthParams(returnTo, { github_oauth: result });
+}
+
+function withOauthParams(returnTo: string, params: Record<string, string>) {
+  const hashIndex = returnTo.indexOf("#");
+  const pathAndQuery = hashIndex === -1 ? returnTo : returnTo.slice(0, hashIndex);
+  const hash = hashIndex === -1 ? "" : returnTo.slice(hashIndex);
+  const separator = pathAndQuery.includes("?") ? "&" : "?";
+  const query = new URLSearchParams(params).toString();
+  return `${pathAndQuery}${separator}${query}${hash}`;
 }
 
 function githubConnectionResponse(professorId: string): GithubConnectionResponse {
@@ -96,6 +117,53 @@ function githubConnectionResponse(professorId: string): GithubConnectionResponse
     githubUsername: connection?.githubUsername ?? null,
     scope: connection?.scope ?? null,
   };
+}
+
+function createStudentGithubLoginToken(userId: string, secret: string) {
+  const payload: StudentGithubLoginToken = {
+    role: "student",
+    userId,
+    expiresAt: Date.now() + 5 * 60_000,
+    nonce: crypto.randomUUID(),
+  };
+  const encoded = base64Url(JSON.stringify(payload));
+  return `${encoded}.${signPayload(encoded, secret)}`;
+}
+
+function verifyStudentGithubLoginToken(token: string, secret: string): StudentGithubLoginToken | undefined {
+  const [encoded, signature] = token.split(".");
+  if (!encoded || !signature) return undefined;
+  if (!timingSafeStringEqual(signPayload(encoded, secret), signature)) return undefined;
+  const payload = JSON.parse(fromBase64Url(encoded)) as StudentGithubLoginToken;
+  if (payload.role !== "student" || !payload.userId || !payload.expiresAt || payload.expiresAt < Date.now()) return undefined;
+  return payload;
+}
+
+async function exchangeGithubCodeForProfile(input: { code: string; state: string; redirectUri: string; clientId: string; clientSecret: string }) {
+  const tokenResponse = await fetch("https://github.com/login/oauth/access_token", {
+    method: "POST",
+    headers: { Accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({
+      client_id: input.clientId,
+      client_secret: input.clientSecret,
+      code: input.code,
+      redirect_uri: input.redirectUri,
+      state: input.state,
+    }),
+  });
+  const token = await tokenResponse.json() as GithubTokenResponse;
+  if (!tokenResponse.ok || token.error || !token.access_token) return undefined;
+
+  const profileResponse = await fetch("https://api.github.com/user", {
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${token.access_token}`,
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+  });
+  if (!profileResponse.ok) return undefined;
+  const profile = await profileResponse.json() as GithubOAuthProfile;
+  return { token, profile };
 }
 
 export function registerUserRoutes(app: Hono) {
@@ -124,6 +192,15 @@ export function registerUserRoutes(app: Hono) {
     const user = User.findById(c.req.param("userId"));
     if (!user) notFound("User not found");
     return c.json(User.toPublicUser(User.setGithubUsername(user.id, body.githubUsername)));
+  });
+
+  app.get("/users/:userId/github/repositories", async (c) => {
+    const user = User.findById(c.req.param("userId"));
+    if (!user) notFound("User not found");
+    if (Professor.findByUserId(user.id)) forbidden("Professor accounts cannot select student repositories");
+    const githubAccount = User.githubConnection(user.id);
+    if (!githubAccount) unauthorized("Connect GitHub before selecting repositories");
+    return c.json(await listGithubRepositories(githubAccount.accessToken));
   });
 
   app.post("/professors", async (c) => {
@@ -173,14 +250,14 @@ export function registerUserRoutes(app: Hono) {
     if (!professor) return c.redirect(withOauthResult(returnTo, "missing_professor"));
 
     const config = githubOAuthConfig();
-    if (!config.clientId || !config.clientSecret || !config.redirectUri) {
+    if (!config.clientId || !config.clientSecret || !config.professorRedirectUri) {
       return c.redirect(withOauthResult(returnTo, "missing_config"));
     }
 
     const authorizeUrl = new URL("https://github.com/login/oauth/authorize");
     authorizeUrl.searchParams.set("client_id", config.clientId);
-    authorizeUrl.searchParams.set("redirect_uri", config.redirectUri);
-    authorizeUrl.searchParams.set("scope", config.scopes);
+    authorizeUrl.searchParams.set("redirect_uri", config.professorRedirectUri);
+    authorizeUrl.searchParams.set("scope", config.professorScopes);
     authorizeUrl.searchParams.set("state", createGithubState({ professorId: professor.id, returnTo }, config.stateSecret));
     return c.redirect(authorizeUrl.toString());
   });
@@ -192,44 +269,105 @@ export function registerUserRoutes(app: Hono) {
     const payload = state ? verifyGithubState(state, config.stateSecret) : undefined;
     const returnTo = safeReturnPath(payload?.returnTo);
 
-    if (!code || !payload || !config.clientId || !config.clientSecret || !config.redirectUri) {
+    if (!code || !payload?.professorId || !config.clientId || !config.clientSecret || !config.professorRedirectUri) {
       return c.redirect(withOauthResult(returnTo, "failed"));
     }
 
-    const tokenResponse = await fetch("https://github.com/login/oauth/access_token", {
-      method: "POST",
-      headers: { Accept: "application/json", "content-type": "application/json" },
-      body: JSON.stringify({
-        client_id: config.clientId,
-        client_secret: config.clientSecret,
-        code,
-        redirect_uri: config.redirectUri,
-        state,
-      }),
+    const github = await exchangeGithubCodeForProfile({
+      code,
+      state,
+      redirectUri: config.professorRedirectUri,
+      clientId: config.clientId,
+      clientSecret: config.clientSecret,
     });
-    const token = await tokenResponse.json() as GithubTokenResponse;
-    if (!tokenResponse.ok || token.error || !token.access_token) return c.redirect(withOauthResult(returnTo, "failed"));
+    if (!github) return c.redirect(withOauthResult(returnTo, "failed"));
 
-    const profileResponse = await fetch("https://api.github.com/user", {
-      headers: {
-        Accept: "application/vnd.github+json",
-        Authorization: `Bearer ${token.access_token}`,
-        "X-GitHub-Api-Version": "2022-11-28",
-      },
-    });
-    if (!profileResponse.ok) return c.redirect(withOauthResult(returnTo, "failed"));
-    const profile = await profileResponse.json() as GithubOAuthProfile;
     try {
-      Professor.connectGithubAccount(payload.professorId, profile, {
-        accessToken: token.access_token,
-        tokenType: token.token_type ?? null,
-        scope: token.scope ?? null,
+      Professor.connectGithubAccount(payload.professorId, github.profile, {
+        accessToken: github.token.access_token!,
+        tokenType: github.token.token_type ?? null,
+        scope: github.token.scope ?? null,
       });
     } catch {
       return c.redirect(withOauthResult(returnTo, "failed"));
     }
 
     return c.redirect(withOauthResult(returnTo, "connected"));
+  });
+
+  app.get("/auth/student/github/start", (c) => {
+    const returnTo = safeReturnPath(c.req.query("returnTo"));
+    const userId = c.req.query("userId");
+    const user = userId ? User.findById(userId) : undefined;
+    if (userId && (!user || Professor.findByUserId(user.id))) {
+      return c.redirect(withOauthResult(returnTo, "missing_student"));
+    }
+
+    const config = githubOAuthConfig();
+    if (!config.clientId || !config.clientSecret || !config.studentRedirectUri) {
+      return c.redirect(withOauthResult(returnTo, "missing_config"));
+    }
+
+    const authorizeUrl = new URL("https://github.com/login/oauth/authorize");
+    authorizeUrl.searchParams.set("client_id", config.clientId);
+    authorizeUrl.searchParams.set("redirect_uri", config.studentRedirectUri);
+    authorizeUrl.searchParams.set("scope", config.studentScopes);
+    authorizeUrl.searchParams.set("state", createGithubState({ userId: user?.id, returnTo }, config.stateSecret));
+    return c.redirect(authorizeUrl.toString());
+  });
+
+  app.get("/auth/student/github/callback", async (c) => {
+    const code = c.req.query("code");
+    const state = c.req.query("state");
+    const config = githubOAuthConfig();
+    const payload = state ? verifyGithubState(state, config.stateSecret) : undefined;
+    const returnTo = safeReturnPath(payload?.returnTo);
+
+    if (!code || !payload || !config.clientId || !config.clientSecret || !config.studentRedirectUri) {
+      return c.redirect(withOauthResult(returnTo, "failed"));
+    }
+
+    const github = await exchangeGithubCodeForProfile({
+      code,
+      state,
+      redirectUri: config.studentRedirectUri,
+      clientId: config.clientId,
+      clientSecret: config.clientSecret,
+    });
+    if (!github) return c.redirect(withOauthResult(returnTo, "failed"));
+    const targetUser = payload.userId ? User.findById(payload.userId) : User.findByGithubUserId(String(github.profile.id));
+    if (payload.userId && !targetUser) return c.redirect(withOauthResult(returnTo, "failed"));
+    if (targetUser && Professor.findByUserId(targetUser.id)) return c.redirect(withOauthResult(returnTo, "failed"));
+
+    try {
+      const studentToken = {
+        accessToken: github.token.access_token!,
+        tokenType: github.token.token_type ?? null,
+        scope: github.token.scope ?? null,
+      };
+      const user = payload.userId
+        ? User.connectGithubAccount(payload.userId, github.profile, studentToken)
+        : User.loginOrCreateWithGithub(github.profile, studentToken);
+      if (Professor.findByUserId(user.id)) return c.redirect(withOauthResult(returnTo, "failed"));
+
+      return c.redirect(withOauthParams(returnTo, {
+        github_oauth: "student_connected",
+        github_login_token: createStudentGithubLoginToken(user.id, config.stateSecret),
+      }));
+    } catch {
+      return c.redirect(withOauthResult(returnTo, "failed"));
+    }
+  });
+
+  app.get("/auth/student/github/session", (c) => {
+    const token = c.req.query("token");
+    const config = githubOAuthConfig();
+    const payload = token ? verifyStudentGithubLoginToken(token, config.stateSecret) : undefined;
+    if (!payload) unauthorized("Invalid GitHub login token");
+
+    const user = User.findById(payload.userId);
+    if (!user || Professor.findByUserId(user.id)) unauthorized("Invalid GitHub login token");
+    return c.json(User.toPublicUser(User.updatePresence(user.id)));
   });
 
   app.post("/auth/student/login", async (c) => {

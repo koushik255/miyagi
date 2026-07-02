@@ -1,6 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db, nowIso } from "./db";
-import { notFound } from "./errors";
+import { forbidden, notFound } from "./errors";
 import { parseGithubRepoUrl } from "./github-url";
 import { listGroupMembers } from "./group-member-read-model";
 import { requireAssignmentOwnedByProfessor, requireCourseMember, requireGroupOwnedByProfessor } from "./guards";
@@ -30,6 +30,7 @@ export const Group = {
         githubRepoUrl: null,
         githubOwner: null,
         githubRepo: null,
+        githubAccessUserId: null,
         professorId,
         createdAt: nowIso(),
       };
@@ -134,6 +135,7 @@ export const Group = {
         githubRepoUrl: input.githubRepoUrl ?? null,
         githubOwner: parsed?.owner ?? null,
         githubRepo: parsed?.repo ?? null,
+        githubAccessUserId: null,
         professorId: input.professorId,
         createdAt: nowIso(),
       };
@@ -148,15 +150,32 @@ export const Group = {
     throw new Error("Could not generate a unique group join code");
   },
 
-  updateGithubRepository(groupId: string, githubRepoUrl?: string): Group | undefined {
+  updateGithubRepository(groupId: string, githubRepoUrl?: string, githubAccessUserId: string | null = null): Group | undefined {
     if (!githubRepoUrl) return undefined;
     const parsed = parseGithubRepoUrl(githubRepoUrl);
     return db
       .update(groups)
-      .set({ repositoryProvider: "github", githubRepoUrl, githubOwner: parsed?.owner ?? null, githubRepo: parsed?.repo ?? null, cloneUrl: githubRepoUrl })
+      .set({
+        repositoryProvider: "github",
+        githubRepoUrl,
+        githubOwner: parsed?.owner ?? null,
+        githubRepo: parsed?.repo ?? null,
+        githubAccessUserId,
+        cloneUrl: githubRepoUrl,
+        repoPath: null,
+      })
       .where(eq(groups.id, groupId))
       .returning()
       .get();
+  },
+
+  connectStudentGithubRepository(input: { groupId: string; userId: string; githubRepoUrl: string }): Group {
+    const group = this.findById(input.groupId);
+    if (!group) notFound("Group not found");
+    if (!this.findMember(input.userId, group.id)) forbidden("Student must belong to the group before connecting a repository");
+    const updated = this.updateGithubRepository(group.id, input.githubRepoUrl, input.userId);
+    if (!updated) throw new Error("Could not connect GitHub repository");
+    return updated;
   },
 
   findById(groupId: string): Group | undefined {
@@ -197,6 +216,7 @@ export const Group = {
         githubRepoUrl: groups.githubRepoUrl,
         githubOwner: groups.githubOwner,
         githubRepo: groups.githubRepo,
+        githubAccessUserId: groups.githubAccessUserId,
         professorId: groups.professorId,
         createdAt: groups.createdAt,
         role: groupMembers.role,

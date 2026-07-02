@@ -2,7 +2,8 @@ import { pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 import { eq, notInArray, or, sql } from "drizzle-orm";
 import { db, nowIso } from "./db";
 import { badRequest, conflict, unauthorized } from "./errors";
-import { professors, users } from "./schema";
+import { professors, userGithubAccounts, users } from "./schema";
+import type { GithubOAuthProfile, GithubOAuthToken } from "./professor";
 
 const PASSWORD_PREFIX = "pbkdf2";
 const PASSWORD_ITERATIONS = 210_000;
@@ -62,7 +63,8 @@ function isHashedPassword(password: string | null): boolean {
 
 export const User = {
   toPublicUser(user: User): PublicUser {
-    const { password: _password, ...publicUser } = user;
+    const publicUser = { ...user };
+    delete publicUser.password;
     return publicUser;
   },
 
@@ -73,6 +75,7 @@ export const User = {
     email?: string,
     studentId?: string,
     githubUsername?: string,
+    githubUserId?: string,
   ): User {
     const timestamp = nowIso();
     const user: NewUser = {
@@ -81,6 +84,7 @@ export const User = {
       displayName,
       email: email ?? null,
       studentId: studentId ?? null,
+      githubUserId: githubUserId ?? null,
       githubUsername: githubUsername ?? null,
       avatarColor: defaultAvatarColor(deviceHash),
       password: password ? hashPassword(password) : null,
@@ -128,6 +132,7 @@ export const User = {
           displayName: input.name,
           email: email ?? existing.email,
           studentId: input.studentId ?? existing.studentId,
+          githubUserId: existing.githubUserId,
           githubUsername: existing.githubUsername,
           password: input.password ? hashPassword(input.password) : existing.password,
           lastSeenAt: nowIso(),
@@ -174,6 +179,82 @@ export const User = {
     return this.updateAccount(id, { githubUsername });
   },
 
+  upsertGithubAccount(id: string, profile: GithubOAuthProfile, token: GithubOAuthToken): void {
+    const timestamp = nowIso();
+    db
+      .insert(userGithubAccounts)
+      .values({
+        userId: id,
+        githubUserId: String(profile.id),
+        githubUsername: profile.login,
+        accessToken: token.accessToken,
+        tokenType: token.tokenType ?? null,
+        scope: token.scope ?? null,
+        connectedAt: timestamp,
+        updatedAt: timestamp,
+      })
+      .onConflictDoUpdate({
+        target: userGithubAccounts.userId,
+        set: {
+          githubUserId: String(profile.id),
+          githubUsername: profile.login,
+          accessToken: token.accessToken,
+          tokenType: token.tokenType ?? null,
+          scope: token.scope ?? null,
+          updatedAt: timestamp,
+        },
+      })
+      .run();
+  },
+
+  connectGithubAccount(id: string, profile: GithubOAuthProfile, token?: GithubOAuthToken): User {
+    const githubUserId = String(profile.id);
+    const existing = this.findByGithubUserId(githubUserId);
+    if (existing && existing.id !== id) conflict("This GitHub account is already connected to another user");
+
+    const user = db
+      .update(users)
+      .set({
+        githubUserId,
+        githubUsername: profile.login,
+        lastSeenAt: nowIso(),
+      })
+      .where(eq(users.id, id))
+      .returning()
+      .get();
+    if (token) this.upsertGithubAccount(user.id, profile, token);
+    return user;
+  },
+
+  githubConnection(userId: string) {
+    return db.select().from(userGithubAccounts).where(eq(userGithubAccounts.userId, userId)).get();
+  },
+
+  loginOrCreateWithGithub(profile: GithubOAuthProfile, token?: GithubOAuthToken): User {
+    const githubUserId = String(profile.id);
+    const githubLogin = normalizeUsername(profile.login);
+    const email = profile.email?.trim().toLowerCase() || undefined;
+    const existing = this.findByGithubUserId(githubUserId)
+      ?? this.findByDeviceHash(githubLogin)
+      ?? (email ? this.findByEmail(email) : undefined);
+    if (existing) {
+      return this.connectGithubAccount(existing.id, profile, token);
+    }
+
+    const deviceHash = githubLogin || `github:${githubUserId}`;
+    const user = this.createAnonymousUser(
+      deviceHash,
+      profile.name?.trim() || profile.login,
+      undefined,
+      email,
+      undefined,
+      profile.login,
+      githubUserId,
+    );
+    if (token) this.upsertGithubAccount(user.id, profile, token);
+    return user;
+  },
+
   findByDeviceHash(deviceHash: string): User | undefined {
     return db.select().from(users).where(sql`lower(${users.deviceHash}) = ${normalizeUsername(deviceHash)}`).get();
   },
@@ -184,6 +265,10 @@ export const User = {
 
   findByStudentId(studentId: string): User | undefined {
     return db.select().from(users).where(eq(users.studentId, studentId)).get();
+  },
+
+  findByGithubUserId(githubUserId: string): User | undefined {
+    return db.select().from(users).where(eq(users.githubUserId, githubUserId)).get();
   },
 
   findByEmailOrStudentId(value: string): User | undefined {

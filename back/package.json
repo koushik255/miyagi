@@ -3,17 +3,6 @@
   "scripts": {
     "dev": "bun run --hot src/index.ts",
     "dev:tunnel": "cd .. && npm run build && cd back && bun run dev",
-    "reset:db": "bun run scripts/reset-db.ts",
-    "seed:multi-professor": "bun run scripts/seed-multi-professor.ts",
-    "seed:test-course": "bun run scripts/seed-test-course.ts",
-    "seed:github-fixture": "bun run scripts/seed-github-fixture.ts",
-    "setup:github-fixture": "bun run reset:db && bun run seed:github-fixture",
-    "reset:test-session": "DB_PATH=./test-session.sqlite bun run scripts/reset-db.ts",
-    "seed:test-session": "DB_PATH=./test-session.sqlite bun run scripts/seed-test-course.ts",
-    "seed:github-fixture-session": "DB_PATH=./test-session.sqlite bun run scripts/seed-github-fixture.ts",
-    "setup:test-session": "bun run reset:test-session && bun run seed:test-session",
-    "setup:github-fixture-session": "bun run reset:test-session && bun run seed:github-fixture-session",
-    "dev:test-session": "DB_PATH=./test-session.sqlite bun run --hot src/index.ts",
     "test": "DB_PATH=./test.sqlite bun test src/backend.test.ts"
   },
   "dependencies": {

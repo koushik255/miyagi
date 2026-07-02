@@ -48,6 +48,14 @@ import './App.css'
 function showError(err: unknown, fallback = 'Something went wrong') {
   toast.error(err instanceof Error ? err.message : fallback)
 }
+
+function GitHubIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 19 19" aria-hidden="true" focusable="false">
+      <use href="/icons.svg#github-icon" />
+    </svg>
+  )
+}
 const calendarDateTimeFormatter = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' })
 const calendarDayFormatter = new Intl.DateTimeFormat('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' })
 const calendarMonthFormatter = new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' })
@@ -180,27 +188,41 @@ type CalendarEntry = {
   itemId?: string
 }
 
+
 function App() {
   const [session, setSession] = useState<Session | null>(() => {
     try { return JSON.parse(localStorage.getItem('miyagi.session') ?? 'null') } catch { return null }
   })
 
-  const saveSession = (next: Session | null) => {
+  const saveSession = useCallback((next: Session | null) => {
     setSession(next)
     if (next) localStorage.setItem('miyagi.session', JSON.stringify(next))
     else localStorage.removeItem('miyagi.session')
-  }
+  }, [])
+
 
   useEffect(() => {
     const url = new URL(window.location.href)
     const oauthResult = url.searchParams.get('github_oauth')
-    if (!oauthResult) return
-    if (oauthResult === 'connected') toast.success('GitHub account connected')
+    const githubLoginToken = url.searchParams.get('github_login_token')
+    if (!oauthResult && !githubLoginToken) return
+
+    if (oauthResult === 'student_connected' && githubLoginToken) {
+      api<User>(`/auth/student/github/session?token=${encodeURIComponent(githubLoginToken)}`)
+        .then((user) => {
+          saveSession({ role: 'student', user })
+          toast.success('Signed in with GitHub')
+        })
+        .catch((err) => showError(err, 'GitHub login did not complete'))
+    } else if (oauthResult === 'connected') toast.success('GitHub account connected')
     else if (oauthResult === 'missing_config') toast.error('GitHub OAuth is not configured yet')
+    else if (oauthResult === 'missing_student') toast.error('Student account not found')
     else toast.error('GitHub OAuth did not complete')
+
     url.searchParams.delete('github_oauth')
+    url.searchParams.delete('github_login_token')
     window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
-  }, [])
+  }, [saveSession])
 
   return (
     <>
@@ -273,6 +295,11 @@ function LoginScreen({ onLogin }: { onLogin: (session: Session) => void }) {
     toast.success('Backend URL saved')
   }
 
+  const startStudentGithubLogin = () => {
+    const returnTo = `${window.location.pathname}${window.location.search}`
+    window.location.href = `${getApiBase()}/auth/student/github/start?returnTo=${encodeURIComponent(returnTo)}`
+  }
+
   return (
     <main className="login-shell login-shell-remake">
       <section className="login-hero login-hero-remake" aria-labelledby="login-title">
@@ -317,6 +344,15 @@ function LoginScreen({ onLogin }: { onLogin: (session: Session) => void }) {
         <Button type="submit" variant="primary" size="lg" disabled={submitting} className="login-submit">
           {submitting ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}
         </Button>
+
+        {(mode === 'login' || role === 'student') && (
+          <>
+            <div className="login-divider"><span>or</span></div>
+            <Button type="button" variant="secondary" size="lg" className="login-github" onClick={startStudentGithubLogin}>
+              <GitHubIcon size={16} /> Continue as student with GitHub
+            </Button>
+          </>
+        )}
 
         <Button type="button" variant="ghost" className="toggle-link" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>
           {mode === 'login' ? "Don't have an account?" : 'Already have an account?'}
@@ -577,7 +613,7 @@ function Dashboard(props: DashboardProps) {
   const groupCount = Object.values(groupsByAssignment).reduce((total, groups) => total + groups.length, 0)
   const primaryEmptyTitle = props.role === 'professor' ? 'Account home' : 'Student home'
   const primaryEmptyCopy = props.role === 'professor'
-    ? 'Create a course, import students, publish assignments, and review group work from the sidebar.'
+    ? 'Create a course, publish assignments, import group CSVs, and review group work from the sidebar.'
     : 'Join courses, find assignments, and keep your group work organized from the sidebar.'
   const pageTitle = selectedGroup?.name ?? selectedAssignment?.name ?? selectedCourse?.name ?? primaryEmptyTitle
   const pageSubtitle = selectedGroup && selectedCourse && selectedAssignment
@@ -784,6 +820,7 @@ function Dashboard(props: DashboardProps) {
                 group={selectedGroup}
                 role={props.role}
                 professorId={props.role === 'professor' ? props.professor.id : undefined}
+                studentUser={props.role === 'student' ? props.user : undefined}
                 onSidebarContentChange={setSidebarContent}
                 onGroupUpdated={handleGroupUpdated}
               />
@@ -914,6 +951,11 @@ function AccountSettingsDialog({
     window.location.href = `${getApiBase()}/auth/professor/github/start?professorId=${encodeURIComponent(professorId)}&returnTo=${encodeURIComponent(returnTo)}`
   }
 
+  const connectStudentGithub = () => {
+    const returnTo = `${window.location.pathname}${window.location.search}`
+    window.location.href = `${getApiBase()}/auth/student/github/start?userId=${encodeURIComponent(userId)}&returnTo=${encodeURIComponent(returnTo)}`
+  }
+
   const disconnectProfessorGithub = async () => {
     if (!professorId) return
     try {
@@ -985,6 +1027,24 @@ function AccountSettingsDialog({
             <div className="avatar-color-control">
               <Avatar fallback={initials(nameInput || displayName)} style={studentAvatarStyle({ avatarColor: avatarColorInput, userId, displayName: nameInput || displayName })} />
               <Input id="account-avatar-color" type="color" value={avatarColorInput} onChange={(event) => setAvatarColorInput(event.target.value)} aria-label="Avatar color" />
+            </div>
+          </div>
+        )}
+
+        {role === 'student' && (
+          <div className="form-section github-oauth-section">
+            <div className="github-oauth-copy">
+              <label>GitHub login</label>
+              <p>
+                {githubInput
+                  ? `Connected username: ${githubInput}. Use OAuth to verify or update the GitHub account for login.`
+                  : 'Connect GitHub to sign in as this student without a password.'}
+              </p>
+            </div>
+            <div className="github-oauth-actions">
+              <Button type="button" variant="primary" size="sm" onClick={connectStudentGithub} disabled={saving}>
+                <GitHubIcon size={13} /> {githubInput ? 'Reconnect GitHub' : 'Connect GitHub'}
+              </Button>
             </div>
           </div>
         )}
@@ -1714,7 +1774,6 @@ function CourseCalendarView({ courseId, role, assignments, professorId, onSelect
   )
 }
 
-type ImportedStudentCredential = User & { temporaryPassword?: string; studentId?: string | null; email?: string | null }
 
 function CourseDetail({
   course, role, assignments, groupsByAssignment, onSelectAssignment, onAssignmentCreated, professorId,
@@ -1727,19 +1786,13 @@ function CourseDetail({
   onAssignmentCreated: () => void
   professorId?: string
 }) {
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const [importingCsv, setImportingCsv] = useState(false)
-  const [importedCredentials, setImportedCredentials] = useState<ImportedStudentCredential[]>([])
   const [tab, setTab] = useState<CourseCalendarTab>('calendar')
   const [courseMembers, setCourseMembers] = useState<Member[] | null>(null)
-  const [membersRefreshKey, setMembersRefreshKey] = useState(0)
   const assignmentCount = assignments?.length ?? 0
 
   useEffect(() => {
     setTab('calendar')
-    setImportedCredentials([])
     setCourseMembers(null)
-    setMembersRefreshKey(0)
   }, [course.id])
 
   useEffect(() => {
@@ -1762,33 +1815,8 @@ function CourseDetail({
     return () => {
       ignore = true
     }
-  }, [course.id, role, tab, membersRefreshKey])
+  }, [course.id, role, tab])
 
-  const importStudents = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-    if (!file || !professorId) return
-
-    try {
-      setImportingCsv(true)
-      const csv = await file.text()
-      const result = await api<{ importedStudents: number; students: ImportedStudentCredential[] }>(`/courses/${course.id}/import-students`, {
-        method: 'POST',
-        body: JSON.stringify({ professorId, csv }),
-      })
-      const credentials = result.students.filter((student) => student.temporaryPassword)
-      setImportedCredentials(credentials)
-      setMembersRefreshKey((value) => value + 1)
-      toast.success(credentials.length > 0
-        ? `Imported ${result.importedStudents} students. ${credentials.length} temporary passwords generated.`
-        : `Imported ${result.importedStudents} students`)
-      setTab('students')
-    } catch (err) {
-      showError(err, 'Could not import student CSV')
-    } finally {
-      setImportingCsv(false)
-    }
-  }
 
   return (
     <>
@@ -1827,35 +1855,12 @@ function CourseDetail({
                 )}
               </TabsList>
             </Tabs>
-            {role === 'professor' && (
-              <>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".csv,text/csv"
-                  onChange={importStudents}
-                  style={{ display: 'none' }}
-                />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={importingCsv}
-                >
-                  {importingCsv ? 'Importing…' : 'Import CSV'}
-                </Button>
-                <Button type="button" variant="ghost" size="sm" onClick={() => window.open('/students.example.csv', '_blank', 'noopener,noreferrer')}>
-                  Example CSV
-                </Button>
-                {course.joinCode && <CopyChip label="Join code" value={course.joinCode} accent />}
-              </>
-            )}
+            {role === 'professor' && course.joinCode && <CopyChip label="Join code" value={course.joinCode} accent />}
           </div>
         </div>
       </div>
       {role === 'professor' && tab === 'students' ? (
-        <CourseStudentsView courseMembers={courseMembers} importedCredentials={importedCredentials} />
+        <CourseStudentsView courseMembers={courseMembers} />
       ) : tab === 'calendar' ? (
         <div className="tab-body">
           <CourseCalendarView
@@ -1918,26 +1923,7 @@ function CourseDetail({
     </>
   )
 }
-function CourseStudentsView({ courseMembers, importedCredentials }: { courseMembers: Member[] | null; importedCredentials: ImportedStudentCredential[] }) {
-  const credentialsPanel = importedCredentials.length > 0 && (
-    <section className="student-temp-passwords">
-      <div className="student-temp-passwords-head">
-        <div>
-          <h3>Student usernames and temporary passwords</h3>
-          <p>Share these once. The username and starting password are the same.</p>
-        </div>
-        <Badge variant="accent">{importedCredentials.length}</Badge>
-      </div>
-      <div className="student-temp-password-list">
-        {importedCredentials.map((student) => (
-          <div key={student.id} className="student-temp-password-row">
-            <span>{student.displayName}</span>
-            <code>{student.temporaryPassword}</code>
-          </div>
-        ))}
-      </div>
-    </section>
-  )
+function CourseStudentsView({ courseMembers }: { courseMembers: Member[] | null }) {
 
   if (courseMembers === null) {
     return (
@@ -1951,20 +1937,18 @@ function CourseStudentsView({ courseMembers, importedCredentials }: { courseMemb
 
   if (courseMembers.length === 0) {
     return (
-      <CardContent className="detail-empty students-empty-with-credentials">
+      <CardContent className="detail-empty">
         <EmptyState
           icon={<Users size={24} />}
           title="No students in this course"
-          description="Students will appear here after they join the course or you import a CSV."
+          description="Students will appear here after they create an account and join with the course code."
         />
-        {credentialsPanel}
       </CardContent>
     )
   }
 
   return (
     <div className="students-panel">
-      {credentialsPanel}
       <section className="student-section">
         <div className="student-section-header">
           <div>
@@ -2061,6 +2045,9 @@ function AssignmentDetail({
               </Button>
               <Button type="button" variant="ghost" size="sm" onClick={() => window.open('/groups.example.csv', '_blank', 'noopener,noreferrer')}>
                 Example CSV
+              </Button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => window.open('/groups.example.md', '_blank', 'noopener,noreferrer')}>
+                CSV Guide
               </Button>
             </div>
           )}

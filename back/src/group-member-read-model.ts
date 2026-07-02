@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "./db";
 import { groupMembers, users } from "./schema";
 
@@ -12,6 +12,7 @@ export type GroupMemberSummary = {
   role: string;
   githubUsername: string | null;
   movedFromGroupId: string | null;
+  lastSeenAt: string;
   joinedAt: string;
 };
 
@@ -35,9 +36,10 @@ export function listGroupMembers(groupId: string): GroupMemberSummary[] {
       email: users.email,
       avatarColor: users.avatarColor,
       role: groupMembers.role,
-      githubUsername: groupMembers.githubUsername,
+      githubUsername: sql<string | null>`coalesce(${groupMembers.githubUsername}, ${users.githubUsername})`,
       movedFromGroupId: groupMembers.movedFromGroupId,
       joinedAt: groupMembers.joinedAt,
+      lastSeenAt: users.lastSeenAt,
     })
     .from(groupMembers)
     .innerJoin(users, eq(groupMembers.userId, users.id))

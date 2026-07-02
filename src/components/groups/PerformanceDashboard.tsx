@@ -194,8 +194,8 @@ function Metric({
 function TopPerformersWidget({ students, periodLabel }: { students: StudentActivity[]; periodLabel: string }) {
   return (
     <section className="analytics-card span-2 top-performers-card">
-      <div className="card-head">
-        <div>
+      <div className="card-head top-performer-head">
+        <div className="top-performer-title-block">
           <h4><Trophy size={14} /> Top performers</h4>
           <span>Highest committers in this group {periodLabel}.</span>
         </div>

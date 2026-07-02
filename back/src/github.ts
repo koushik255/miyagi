@@ -6,7 +6,8 @@ import { matchDashboardMemberForCommit } from "./dashboard-stats";
 import { db } from "./db";
 import { runGit } from "./git-command";
 import { Professor } from "./professor";
-import { listDashboardMembers } from "./group-member-read-model";
+import { User } from "./user";
+import { listDashboardMembers, listGroupMembers } from "./group-member-read-model";
 import { getGroupCommitActivity } from "./history";
 import { groups } from "./schema";
 
@@ -15,6 +16,32 @@ type GitHubCommitListItem = {
   html_url: string;
   author: { login: string } | null;
   commit: { author?: { date?: string | null } | null };
+};
+
+type GitHubRepositoryItem = {
+  id: number;
+  name: string;
+  full_name: string;
+  private: boolean;
+  html_url: string;
+  clone_url: string;
+  description?: string | null;
+  updated_at?: string | null;
+  pushed_at?: string | null;
+  owner: { login: string };
+};
+
+export type GithubRepositorySummary = {
+  id: number;
+  name: string;
+  fullName: string;
+  owner: string;
+  htmlUrl: string;
+  cloneUrl: string;
+  private: boolean;
+  description: string | null;
+  updatedAt: string | null;
+  pushedAt: string | null;
 };
 
 type GitHubMirrorConfig = {
@@ -35,7 +62,6 @@ type GitHubCommitCacheEntry = {
 const GITHUB_MIRRORS_ROOT = process.env.GITHUB_MIRRORS_ROOT
   ?? join(process.env.MIYAGI_DATA_ROOT ?? defaultDataRoot(), "github_mirrors");
 const CACHE_FILE = "miyagi-github-cache.json";
-const FIXTURE_FILE = "miyagi-github-fixture.json";
 
 function defaultDataRoot() {
   if (process.platform === "darwin") return join(homedir(), "Library", "Application Support", "Miyagi");
@@ -43,17 +69,92 @@ function defaultDataRoot() {
   return join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "miyagi");
 }
 
-async function githubFetch<T>(path: string, accessToken?: string | null): Promise<T> {
+async function githubRequest<T>(path: string, input: { accessToken?: string | null; method?: string; body?: unknown } = {}): Promise<T> {
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
   };
-  const token = accessToken ?? process.env.GITHUB_TOKEN;
+  const token = input.accessToken ?? process.env.GITHUB_TOKEN;
   if (token) headers.Authorization = `Bearer ${token}`;
+  if (input.body !== undefined) headers["content-type"] = "application/json";
 
-  const response = await fetch(`https://api.github.com${path}`, { headers });
+  const response = await fetch(`https://api.github.com${path}`, {
+    method: input.method ?? "GET",
+    headers,
+    body: input.body === undefined ? undefined : JSON.stringify(input.body),
+  });
   if (!response.ok) throw new Error(`GitHub API failed: ${response.status} ${await response.text()}`);
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
+}
+
+async function githubFetch<T>(path: string, accessToken?: string | null): Promise<T> {
+  return githubRequest<T>(path, { accessToken });
+}
+
+function githubRepositorySummary(repo: GitHubRepositoryItem): GithubRepositorySummary {
+  return {
+    id: repo.id,
+    name: repo.name,
+    fullName: repo.full_name,
+    owner: repo.owner.login,
+    htmlUrl: repo.html_url,
+    cloneUrl: repo.clone_url,
+    private: repo.private,
+    description: repo.description ?? null,
+    updatedAt: repo.updated_at ?? null,
+    pushedAt: repo.pushed_at ?? null,
+  };
+}
+
+export async function listGithubRepositories(accessToken: string): Promise<GithubRepositorySummary[]> {
+  const repositories: GithubRepositorySummary[] = [];
+  for (let page = 1; page <= 5; page += 1) {
+    const pageRepositories = await githubFetch<GitHubRepositoryItem[]>(
+      `/user/repos?affiliation=owner,collaborator,organization_member&sort=updated&per_page=100&page=${page}`,
+      accessToken,
+    );
+    repositories.push(...pageRepositories.map(githubRepositorySummary));
+    if (pageRepositories.length < 100) break;
+  }
+  return repositories;
+}
+
+export async function getGithubRepository(owner: string, repo: string, accessToken: string): Promise<GithubRepositorySummary> {
+  return githubRepositorySummary(await githubFetch<GitHubRepositoryItem>(`/repos/${owner}/${repo}`, accessToken));
+}
+
+export async function createGithubRepository(accessToken: string, input: { name: string; private?: boolean; description?: string | null }): Promise<GithubRepositorySummary> {
+  return githubRepositorySummary(await githubRequest<GitHubRepositoryItem>("/user/repos", {
+    accessToken,
+    method: "POST",
+    body: {
+      name: input.name,
+      private: input.private ?? true,
+      description: input.description ?? undefined,
+      auto_init: true,
+    },
+  }));
+}
+
+export async function addGithubCollaborator(accessToken: string, owner: string, repo: string, username: string): Promise<void> {
+  await githubRequest<void>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/collaborators/${encodeURIComponent(username)}`, {
+    accessToken,
+    method: "PUT",
+    body: { permission: "push" },
+  });
+}
+
+async function checkGithubCollaborator(accessToken: string, owner: string, repo: string, username: string): Promise<boolean> {
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    Authorization: `Bearer ${accessToken}`,
+    "X-GitHub-Api-Version": "2022-11-28",
+  };
+  const response = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/collaborators/${encodeURIComponent(username)}`, { headers });
+  if (response.status === 204) return true;
+  if (response.status === 404) return false;
+  throw new Error(`GitHub collaborator check failed: ${response.status} ${await response.text()}`);
 }
 
 function mirrorPathForGroup(groupId: string) {
@@ -64,13 +165,6 @@ function cachePath(repoPath: string) {
   return join(repoPath, CACHE_FILE);
 }
 
-function fixturePath(repoPath: string) {
-  return join(repoPath, FIXTURE_FILE);
-}
-
-function isFixtureMirror(repoPath: string | null | undefined) {
-  return Boolean(repoPath && existsSync(fixturePath(repoPath)));
-}
 
 function refreshGithubCommitCache(config: GitHubMirrorConfig, repoPath: string) {
   return githubFetch<GitHubCommitListItem[]>(`/repos/${config.githubOwner}/${config.githubRepo}/commits?per_page=100`, config.accessToken)
@@ -105,9 +199,6 @@ export async function syncGithubMirror(config: GitHubMirrorConfig): Promise<stri
   mkdirSync(GITHUB_MIRRORS_ROOT, { recursive: true });
   const mirrorPath = mirrorPathForGroup(config.groupId);
 
-  if (isFixtureMirror(config.repoPath)) {
-    return config.repoPath!;
-  }
 
   if (config.repoPath && config.repoPath !== mirrorPath && existsSync(config.repoPath)) {
     rmSync(config.repoPath, { recursive: true, force: true });
@@ -139,7 +230,8 @@ export async function syncGroupGithubMirror(groupId: string) {
     throw new Error("Group is not connected to a GitHub repository");
   }
 
-  const githubAccount = Professor.githubConnection(group.professorId);
+  const professorGithubAccount = Professor.githubConnection(group.professorId);
+  const studentGithubAccount = group.githubAccessUserId ? User.githubConnection(group.githubAccessUserId) : undefined;
 
   const repoPath = await syncGithubMirror({
     groupId: group.id,
@@ -147,10 +239,42 @@ export async function syncGroupGithubMirror(groupId: string) {
     githubOwner: group.githubOwner,
     githubRepo: group.githubRepo,
     repoPath: group.repoPath,
-    accessToken: githubAccount?.accessToken ?? null,
+    accessToken: studentGithubAccount?.accessToken ?? professorGithubAccount?.accessToken ?? null,
   });
 
   return db.update(groups).set({ repoPath, cloneUrl: group.githubRepoUrl }).where(eq(groups.id, group.id)).returning().get();
+}
+
+export async function getGroupGithubRepositoryAccess(groupId: string) {
+  const group = db.select().from(groups).where(eq(groups.id, groupId)).get();
+  if (!group) throw new Error("Group not found");
+  const members = listGroupMembers(group.id);
+  if (group.repositoryProvider !== "github" || !group.githubRepoUrl || !group.githubOwner || !group.githubRepo) {
+    return { group, members: members.map((member) => ({ ...member, hasRepositoryAccess: null, repositoryAccessReason: "no_repository" })) };
+  }
+
+  const professorGithubAccount = Professor.githubConnection(group.professorId);
+  const studentGithubAccount = group.githubAccessUserId ? User.githubConnection(group.githubAccessUserId) : undefined;
+  const accessToken = studentGithubAccount?.accessToken ?? professorGithubAccount?.accessToken ?? null;
+  if (!accessToken) {
+    return { group, members: members.map((member) => ({ ...member, hasRepositoryAccess: null, repositoryAccessReason: "no_repository_token" })) };
+  }
+
+  const statuses = [];
+  for (const member of members) {
+    if (!member.githubUsername) {
+      statuses.push({ ...member, hasRepositoryAccess: false, repositoryAccessReason: "missing_github_username" });
+      continue;
+    }
+    try {
+      const hasRepositoryAccess = await checkGithubCollaborator(accessToken, group.githubOwner, group.githubRepo, member.githubUsername);
+      statuses.push({ ...member, hasRepositoryAccess, repositoryAccessReason: hasRepositoryAccess ? null : "not_collaborator" });
+    } catch {
+      statuses.push({ ...member, hasRepositoryAccess: null, repositoryAccessReason: "check_failed" });
+    }
+  }
+
+  return { group, members: statuses };
 }
 
 export async function getGroupGithubActivity(groupId: string) {

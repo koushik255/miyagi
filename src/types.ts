@@ -5,14 +5,19 @@ export type ProfessorGithubConnection = { connected: boolean; githubUsername: st
 export type Course = { id: string; name: string; joinCode?: string; professorId: string; joinedAt?: string; role?: string }
 export type Assignment = { id: string; courseId: string; name: string; description: string; dueDate?: string | null; professorId: string; repositoryMode?: 'github'; createdAt: string; updatedAt: string }
 export type CourseCalendarItem = { id: string; courseId: string; professorId: string; assignmentId?: string | null; title: string; description: string; dueAt: string; kind: 'event' | 'deadline'; createdAt: string; updatedAt: string }
-export type Group = { id: string; name: string; courseId: string | null; assignmentId: string | null; joinCode?: string; workspacePath?: string | null; cloneUrl?: string | null; repositoryProvider?: 'github' | 'local'; githubRepoUrl?: string | null }
+export type Group = { id: string; name: string; courseId: string | null; assignmentId: string | null; joinCode?: string; workspacePath?: string | null; cloneUrl?: string | null; repositoryProvider?: 'github' | 'local'; githubRepoUrl?: string | null; githubAccessUserId?: string | null }
 export type WorkspaceFile = { path: string; name: string }
 export type HistoryEntry = { hash: string; author: string; pushedBy?: string | null; when: string; message: string }
 export type GroupDiff =
   | { mode: 'commit'; commit: string; patch: string }
   | { mode: 'range'; base: string; head: string; patch: string }
   | { mode: 'working-tree'; patch: string }
-export type Member = { memberId: string; userId: string; username?: string; email?: string | null; avatarColor?: string | null; displayName: string; role: string; joinedAt: string; githubUsername?: string | null; movedFromGroupId?: string | null }
+export type Member = { memberId: string; userId: string; username?: string; email?: string | null; avatarColor?: string | null; displayName: string; role: string; joinedAt: string; lastSeenAt?: string | null; githubUsername?: string | null; movedFromGroupId?: string | null }
+export type GithubRepository = { id: number; name: string; fullName: string; owner: string; htmlUrl: string; cloneUrl: string; private: boolean; description: string | null; updatedAt: string | null; pushedAt: string | null }
+export type WorkItemEvent = { id: string; workItemId: string; groupId: string; actorUserId?: string | null; actorDisplayName?: string | null; action: string; fromStatus?: string | null; toStatus?: string | null; comment?: string | null; occurredAt: string }
+export type WorkItem = { id: string; groupId: string; assignmentId?: string | null; title: string; description: string; assignedUserId?: string | null; createdByUserId?: string | null; status: 'assigned' | 'in_progress' | 'completed'; completionComment?: string | null; createdAt: string; updatedAt: string; startedAt?: string | null; completedAt?: string | null; events?: WorkItemEvent[] }
+export type GithubRepositoryAccessMember = Member & { hasRepositoryAccess: boolean | null; repositoryAccessReason: string | null }
+export type GithubRepositoryAccess = { group: Group; members: GithubRepositoryAccessMember[] }
 export type Period = 'weekly' | 'monthly' | 'semester'
 export type ContributionBucket = {
   label: string

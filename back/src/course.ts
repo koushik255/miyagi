@@ -91,6 +91,7 @@ export const Course = {
         avatarColor: users.avatarColor,
         role: courseMembers.role,
         joinedAt: courseMembers.joinedAt,
+        lastSeenAt: users.lastSeenAt,
       })
       .from(courseMembers)
       .innerJoin(users, eq(courseMembers.userId, users.id))

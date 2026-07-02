@@ -2,81 +2,10 @@ import { Course } from "./course";
 import { parseCsv } from "./csv";
 import { badRequest, notFound } from "./errors";
 import { Group } from "./group";
-import { requireAssignmentOwnedByProfessor, requireCourseOwnedByProfessor } from "./guards";
+import { requireAssignmentOwnedByProfessor } from "./guards";
 import { User } from "./user";
 
 
-type ImportedStudent = ReturnType<typeof User.toPublicUser> & {
-  temporaryPassword?: string;
-}
-
-function normalizeLookup(value: string | undefined): string | undefined {
-  const normalized = value?.trim().toLowerCase();
-  return normalized || undefined;
-}
-
-function randomFourDigits(): string {
-  return String(Math.floor(Math.random() * 10_000)).padStart(4, "0");
-}
-
-function generatedCredentialForName(name: string, fallback: string): string {
-  const base = (name.trim() || fallback)
-    .replace(/[^a-zA-Z0-9]+/g, "")
-    .slice(0, 24) || "Student";
-
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const candidate = `${base}${randomFourDigits()}`;
-    if (!User.findByDeviceHash(candidate)) return candidate;
-  }
-
-  return `${base}${randomFourDigits()}`;
-}
-
-function findExistingImportedStudent(input: { studentId?: string; username?: string; email?: string }) {
-  const username = normalizeLookup(input.username);
-  const email = input.email?.trim() || (username ? `${username}@example.edu` : undefined);
-  return (username ? User.findByDeviceHash(username) : undefined)
-    ?? (email ? User.findByEmail(email) : undefined)
-    ?? (input.studentId ? User.findByStudentId(input.studentId) : undefined);
-}
-
-function toImportedStudent(user: ReturnType<typeof User.createOrUpdateStudent>, temporaryPassword?: string): ImportedStudent {
-  return {
-    ...User.toPublicUser(user),
-    ...(temporaryPassword ? { temporaryPassword } : {}),
-  };
-}
-
-export function importCourseStudents(input: { professorId: string; courseId: string; csv: string }) {
-  requireCourseOwnedByProfessor(input.courseId, input.professorId);
-
-  const rows = parseCsv(input.csv);
-  const students = rows.map((row) => {
-    const name = row.name || row.display_name || "";
-    const username = row.username || row.user || row.login || undefined;
-    const email = row.email || undefined;
-    const studentId = row.student_id || row.studentid || row.id || undefined;
-    if (!name) badRequest("Student CSV requires a name column");
-    if (!username && !email) badRequest("Student CSV requires a username or email column");
-
-    const existingStudent = findExistingImportedStudent({ studentId, username, email });
-    const generatedCredential = existingStudent ? undefined : generatedCredentialForName(name, username ?? email ?? studentId ?? name);
-    const nextUsername = existingStudent?.deviceHash ?? generatedCredential!;
-    const temporaryPassword = existingStudent ? undefined : nextUsername;
-    const user = User.createOrUpdateStudent({
-      studentId,
-      name,
-      email,
-      username: nextUsername,
-      password: undefined,
-      temporaryPassword,
-    });
-    Course.assignStudentByCourseId(input.courseId, user.id);
-    return toImportedStudent(user, temporaryPassword);
-  });
-
-  return { importedStudents: students.length, students };
-}
 
 
 type AssignmentGroupMemberImport = {

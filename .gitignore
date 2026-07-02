@@ -83,6 +83,7 @@ Desktop.ini
 *.temp
 .tmp/
 tmp/
+.miyagi-dev/
 
 # Backend
 *.sqlite

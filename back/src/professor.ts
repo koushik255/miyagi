@@ -14,6 +14,8 @@ export type NewProfessorGithubAccount = typeof professorGithubAccounts.$inferIns
 export type GithubOAuthProfile = {
   id: number | string;
   login: string;
+  name?: string | null;
+  email?: string | null;
 }
 
 export type GithubOAuthToken = {

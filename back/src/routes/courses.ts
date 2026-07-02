@@ -2,7 +2,6 @@ import type { Hono } from "hono";
 import { Assignment } from "../assignment";
 import { Course } from "../course";
 import { CourseCalendarItem } from "../course-calendar-item";
-import { importCourseStudents } from "../csv-import";
 import { Group } from "../group";
 
 export function registerCourseRoutes(app: Hono) {
@@ -20,10 +19,6 @@ export function registerCourseRoutes(app: Hono) {
   app.get("/courses/user/:userId", (c) => c.json(Course.listByUser(c.req.param("userId"))));
   app.get("/courses/:courseId/members", (c) => c.json(Course.listMembers(c.req.param("courseId"))));
 
-  app.post("/courses/:courseId/import-students", async (c) => {
-    const body = await c.req.json<{ professorId: string; csv: string }>();
-    return c.json(importCourseStudents({ professorId: body.professorId, courseId: c.req.param("courseId"), csv: body.csv }));
-  });
 
   app.get("/courses/:courseId/assignments", (c) => c.json(Assignment.listByCourse(c.req.param("courseId"))));
   app.get("/courses/:courseId/groups", (c) => c.json(Group.listByCourse(c.req.param("courseId"))));

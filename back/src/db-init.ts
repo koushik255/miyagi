@@ -7,6 +7,7 @@ const CREATE_TABLE_STATEMENTS = [
     display_name TEXT NOT NULL,
     email TEXT UNIQUE,
     student_id TEXT UNIQUE,
+    github_user_id TEXT UNIQUE,
     github_username TEXT,
     avatar_color TEXT,
     password TEXT,
@@ -31,6 +32,17 @@ const CREATE_TABLE_STATEMENTS = [
     connected_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (professor_id) REFERENCES professors(id) ON DELETE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS user_github_accounts (
+    user_id TEXT PRIMARY KEY,
+    github_user_id TEXT NOT NULL UNIQUE,
+    github_username TEXT NOT NULL,
+    access_token TEXT NOT NULL,
+    token_type TEXT,
+    scope TEXT,
+    connected_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   )`,
   `CREATE TABLE IF NOT EXISTS courses (
     id TEXT PRIMARY KEY,
@@ -91,11 +103,13 @@ const CREATE_TABLE_STATEMENTS = [
     github_repo_url TEXT,
     github_owner TEXT,
     github_repo TEXT,
+    github_access_user_id TEXT,
     professor_id TEXT NOT NULL,
     created_at TEXT NOT NULL,
     FOREIGN KEY (professor_id) REFERENCES professors(id) ON DELETE CASCADE,
     FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE,
-    FOREIGN KEY (assignment_id) REFERENCES assignments(id) ON DELETE CASCADE
+    FOREIGN KEY (assignment_id) REFERENCES assignments(id) ON DELETE CASCADE,
+    FOREIGN KEY (github_access_user_id) REFERENCES users(id) ON DELETE SET NULL
   )`,
   `CREATE TABLE IF NOT EXISTS group_members (
     id TEXT PRIMARY KEY,
@@ -108,6 +122,39 @@ const CREATE_TABLE_STATEMENTS = [
     UNIQUE (user_id, group_id),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS group_work_items (
+    id TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL,
+    assignment_id TEXT,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    assigned_user_id TEXT,
+    created_by_user_id TEXT,
+    status TEXT NOT NULL DEFAULT 'assigned',
+    completion_comment TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    started_at TEXT,
+    completed_at TEXT,
+    FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+    FOREIGN KEY (assignment_id) REFERENCES assignments(id) ON DELETE CASCADE,
+    FOREIGN KEY (assigned_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (created_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS group_work_item_events (
+    id TEXT PRIMARY KEY,
+    work_item_id TEXT NOT NULL,
+    group_id TEXT NOT NULL,
+    actor_user_id TEXT,
+    action TEXT NOT NULL,
+    from_status TEXT,
+    to_status TEXT,
+    comment TEXT,
+    occurred_at TEXT NOT NULL,
+    FOREIGN KEY (work_item_id) REFERENCES group_work_items(id) ON DELETE CASCADE,
+    FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+    FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE SET NULL
   )`,
   `CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
@@ -182,6 +229,7 @@ const MIGRATIONS: Record<string, Record<string, string>> = {
     password: "ALTER TABLE users ADD COLUMN password TEXT",
     email: "ALTER TABLE users ADD COLUMN email TEXT",
     student_id: "ALTER TABLE users ADD COLUMN student_id TEXT",
+    github_user_id: "ALTER TABLE users ADD COLUMN github_user_id TEXT",
     github_username: "ALTER TABLE users ADD COLUMN github_username TEXT",
     avatar_color: "ALTER TABLE users ADD COLUMN avatar_color TEXT",
   },
@@ -205,6 +253,7 @@ const MIGRATIONS: Record<string, Record<string, string>> = {
     github_repo_url: "ALTER TABLE groups ADD COLUMN github_repo_url TEXT",
     github_owner: "ALTER TABLE groups ADD COLUMN github_owner TEXT",
     github_repo: "ALTER TABLE groups ADD COLUMN github_repo TEXT",
+    github_access_user_id: "ALTER TABLE groups ADD COLUMN github_access_user_id TEXT REFERENCES users(id) ON DELETE SET NULL",
   },
   group_members: {
     github_username: "ALTER TABLE group_members ADD COLUMN github_username TEXT",
@@ -231,6 +280,7 @@ export function initDatabase() {
 
   hydrateProfessorPages();
   sqlite.run("CREATE UNIQUE INDEX IF NOT EXISTS professors_page_slug_unique ON professors(page_slug)");
+  sqlite.run("CREATE UNIQUE INDEX IF NOT EXISTS users_github_user_id_unique ON users(github_user_id)");
 }
 
 function hydrateProfessorPages() {
