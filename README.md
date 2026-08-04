@@ -1,6 +1,6 @@
 # Miyagi
 
-Miyagi helps professors organize courses and assignments, connect public student GitHub repositories, and review contribution activity.
+Miyagi aids professors organize courses and assignments, connect public student GitHub repositories, and review contribution activity.
 
 ## Local development
 
