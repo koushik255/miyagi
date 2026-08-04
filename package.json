@@ -5,20 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "dev:dual": "node scripts/dev-dual.mjs",
-    "dev:tunnel": "npm run build && cd back && bun run dev",
-    "build": "tsc -b && vite build",
-    "lint": "eslint .",
-    "preview": "vite preview"
+    "build": "tsc --noEmit && vite build",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
-    "@pierre/diffs": "^1.2.0",
-    "@pierre/trees": "^1.0.0-beta.4",
     "lucide-react": "^1.16.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
-    "shiki": "^4.0.2",
     "sonner": "^2.0.7"
   },
   "devDependencies": {

@@ -1,12 +1,12 @@
 {
-  "name": "my-app",
+  "name": "miyagi-backend",
   "scripts": {
     "dev": "bun run --hot src/index.ts",
-    "dev:tunnel": "cd .. && npm run build && cd back && bun run dev",
-    "test": "DB_PATH=./test.sqlite bun test src/backend.test.ts"
+    "test": "bun test src/backend.test.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",
+    "effect": "^3.22.1",
     "hono": "^4.12.18"
   },
   "devDependencies": {

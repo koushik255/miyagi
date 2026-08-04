@@ -18,5 +18,10 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      // Fetch lifecycles and controlled view resets intentionally set loading state
+      // from effects. The exhaustive dependency rule still guards stale closures.
+      'react-hooks/set-state-in-effect': 'off',
+    },
   },
 ])

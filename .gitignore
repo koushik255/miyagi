@@ -1,108 +1,26 @@
-# Dependencies
 node_modules/
-.pnp/
-.pnp.cjs
-
-# Build output
 dist/
-dist-ssr/
-build/
-out/
-release/
-.esbuild/
 .vite/
-.vite-temp/
-backend-uml.html
-vite/
+*.tsbuildinfo
 
-# Electron packaging artifacts
-*.AppImage
-*.snap
-*.deb
-*.rpm
-*.dmg
-*.exe
-*.msi
-*.blockmap
-latest*.yml
-builder-debug.yml
-builder-effective-config.yaml
-
-# Logs
-logs/
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-bun-debug.log*
-
-# Environment / secrets
 .env
 .env.*
 !.env.example
 *.local
 
-# TypeScript / tooling cache
-*.tsbuildinfo
-node_modules/.tmp/
-.eslintcache
-.cache/
-.parcel-cache/
-.turbo/
-.bun/
-
-# Test / coverage output
+*.log
 coverage/
-.nyc_output/
-playwright-report/
-test-results/
+.cache/
 
-# OS files
-.DS_Store
-.AppleDouble
-.LSOverride
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
-.idea/
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-
-# Local app data / temporary files
-*.tmp
-*.temp
-.tmp/
-tmp/
-.miyagi-dev/
-
-# Backend
 *.sqlite
 *.sqlite-*
 *.sqlite3
 *.sqlite3-*
 *.db
 *.db-*
-cli/.session.json
-back/cli/.session.json
 
-# Miyagi runtime Git data
-# These contain nested .git repos / bare repos created by the backend.
-# They are local runtime state, not source code.
-group_workspaces/
-group_repos/
-back/group_workspaces/
-back/group_repos/
-back/fixture-data/
-
-# OpenTUI / Tree-sitter parser caches
-.tree-sitter/
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json

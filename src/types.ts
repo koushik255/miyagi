@@ -1,25 +1,15 @@
 export type Role = 'professor' | 'student'
-export type User = { id: string; displayName: string; deviceHash?: string; githubUsername?: string | null; avatarColor?: string | null }
-export type Professor = { id: string; userId: string; pageSlug?: string; pageTitle?: string; user?: User }
+export type User = { id: string; displayName: string; githubUsername?: string | null; avatarColor?: string | null }
+export type Professor = { id: string; userId: string; user?: User }
 export type ProfessorGithubConnection = { connected: boolean; githubUsername: string | null; scope?: string | null }
-export type Course = { id: string; name: string; joinCode?: string; professorId: string; joinedAt?: string; role?: string }
-export type Assignment = { id: string; courseId: string; name: string; description: string; dueDate?: string | null; professorId: string; repositoryMode?: 'github'; createdAt: string; updatedAt: string }
-export type CourseCalendarItem = { id: string; courseId: string; professorId: string; assignmentId?: string | null; title: string; description: string; dueAt: string; kind: 'event' | 'deadline'; createdAt: string; updatedAt: string }
-export type Group = { id: string; name: string; courseId: string | null; assignmentId: string | null; joinCode?: string; workspacePath?: string | null; cloneUrl?: string | null; repositoryProvider?: 'github' | 'local'; githubRepoUrl?: string | null; githubAccessUserId?: string | null }
-export type WorkspaceFile = { path: string; name: string }
-export type HistoryEntry = { hash: string; author: string; pushedBy?: string | null; when: string; message: string }
-export type GroupDiff =
-  | { mode: 'commit'; commit: string; patch: string }
-  | { mode: 'range'; base: string; head: string; patch: string }
-  | { mode: 'working-tree'; patch: string }
-export type Member = { memberId: string; userId: string; username?: string; email?: string | null; avatarColor?: string | null; displayName: string; role: string; joinedAt: string; lastSeenAt?: string | null; githubUsername?: string | null; movedFromGroupId?: string | null }
-export type GithubRepository = { id: number; name: string; fullName: string; owner: string; htmlUrl: string; cloneUrl: string; private: boolean; description: string | null; updatedAt: string | null; pushedAt: string | null }
-export type WorkItemEvent = { id: string; workItemId: string; groupId: string; actorUserId?: string | null; actorDisplayName?: string | null; action: string; fromStatus?: string | null; toStatus?: string | null; comment?: string | null; occurredAt: string }
-export type WorkItem = { id: string; groupId: string; assignmentId?: string | null; title: string; description: string; assignedUserId?: string | null; createdByUserId?: string | null; status: 'assigned' | 'in_progress' | 'completed'; completionComment?: string | null; createdAt: string; updatedAt: string; startedAt?: string | null; completedAt?: string | null; events?: WorkItemEvent[] }
-export type GithubRepositoryAccessMember = Member & { hasRepositoryAccess: boolean | null; repositoryAccessReason: string | null }
-export type GithubRepositoryAccess = { group: Group; members: GithubRepositoryAccessMember[] }
+export type Course = { id: string; name: string }
+export type CourseMembershipSuggestion = { id: string; courseName: string; githubUsername: string }
+export type Assignment = { id: string; courseId: string; name: string; description: string; dueDate?: string | null }
+export type CourseCalendarItem = { id: string; assignmentId?: string | null; title: string; description: string; dueAt: string; kind: 'event' | 'deadline' }
+export type Repository = { id: string; name: string; courseId: string; assignmentId: string; githubRepoUrl: string; githubRepo: string }
+export type Member = { memberId: string; userId: string; avatarColor?: string | null; displayName: string; role: string; joinedAt: string; githubUsername?: string | null }
 export type Period = 'weekly' | 'monthly' | 'semester'
-export type ContributionBucket = {
+type ContributionBucket = {
   label: string
   shortLabel: string
   start: string
@@ -41,10 +31,10 @@ export type StudentActivity = {
   changedFiles: number
   timeline: ContributionBucket[]
 }
-export type ActivityCommit = { hash: string; message: string; authorName: string; githubUsername?: string | null; matchedStudent?: { userId: string; username?: string | null; displayName: string; avatarColor?: string | null; githubUsername?: string | null } | null; groupName?: string; when: string | null; additions: number; deletions: number; changedFiles: number; htmlUrl?: string | null }
+export type ActivityCommit = { hash: string; message: string; authorName: string; githubUsername?: string | null; matchedStudent?: { userId: string; displayName: string; avatarColor?: string | null; githubUsername?: string | null } | null; when: string | null; additions: number; deletions: number; changedFiles: number; htmlUrl?: string | null }
 export type ActivityDashboard = {
   period: Period
-  totals: { groups?: number; students: number; commits: number; additions: number; deletions: number; changedFiles: number }
+  totals: { repositories?: number; students: number; commits: number; additions: number; deletions: number; changedFiles: number }
   timeline: ContributionBucket[]
   timelineCadence: 'Daily' | 'Weekly'
   byStudent: StudentActivity[]
@@ -54,8 +44,18 @@ export type ActivityDashboard = {
   lowestCommitter: StudentActivity | null
   recentActivity: ActivityCommit[]
   commits: ActivityCommit[]
+  lastCommitAt?: string | null
+}
+
+export type RepositoryActivityDashboard = ActivityDashboard & {
+  repository: Repository
+  members: StudentActivity[]
+}
+
+export type AssignmentActivityDashboard = ActivityDashboard & {
+  repositories?: RepositoryActivityDashboard[]
 }
 
 export type Session =
   | { role: 'student'; user: User }
-  | { role: 'professor'; professor: Professor; displayName: string }
+  | { role: 'professor'; professor: Professor; displayName: string; justRegistered?: boolean }

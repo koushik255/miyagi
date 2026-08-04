@@ -3,18 +3,18 @@ import type { CSSProperties } from 'react'
 const DEFAULT_STUDENT_AVATAR_COLORS = ['#3b82f6', '#ef4444', '#facc15', '#f97316', '#22c55e', '#ec4899'] as const
 const AVATAR_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/
 
-export function defaultStudentAvatarColor(seed: string) {
+function defaultStudentAvatarColor(seed: string) {
   let hash = 0
   for (let index = 0; index < seed.length; index += 1) hash = (hash * 31 + seed.charCodeAt(index)) >>> 0
   return DEFAULT_STUDENT_AVATAR_COLORS[hash % DEFAULT_STUDENT_AVATAR_COLORS.length]
 }
 
-export function normalizeAvatarColor(value: string | null | undefined, seed: string) {
+function normalizeAvatarColor(value: string | null | undefined, seed: string) {
   const color = value?.trim()
   return color && AVATAR_COLOR_PATTERN.test(color) ? color.toLowerCase() : defaultStudentAvatarColor(seed)
 }
 
-export function avatarTextColor(backgroundColor: string) {
+function avatarTextColor(backgroundColor: string) {
   const normalized = backgroundColor.replace('#', '')
   const red = Number.parseInt(normalized.slice(0, 2), 16)
   const green = Number.parseInt(normalized.slice(2, 4), 16)

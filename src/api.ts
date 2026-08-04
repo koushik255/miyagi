@@ -10,6 +10,7 @@ export function getApiBase(): string {
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${getApiBase()}${path}`, {
     ...options,
+    credentials: 'include',
     headers: { 'content-type': 'application/json', ...options?.headers },
   })
 
