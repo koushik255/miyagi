@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { assignmentRepositories, assignments, db, nowIso, users } from "./db";
 import { AppError, badRequest, forbidden, notFound, trySync } from "./errors";
-import { getGithubRepository, parseGithubRepoUrl, readGithubCommitCache } from "./github";
+import { getGithubRepository, getGithubRepositoryContributorCount, parseGithubRepoUrl, readGithubCommitCache } from "./github";
 import { Professor } from "./professor";
 
 export type AssignmentRepository = typeof assignmentRepositories.$inferSelect;
@@ -36,6 +36,10 @@ export const AssignmentRepository = {
       const repo = yield* getGithubRepository(parsed.owner, parsed.repo, githubAccount?.accessToken);
       if (repo.private) {
         return yield* badRequest("Miyagi only supports public repositories. Ask the student to make this repository public before adding it.");
+      }
+      const contributorCount = yield* getGithubRepositoryContributorCount(parsed.owner, parsed.repo, githubAccount?.accessToken);
+      if (contributorCount > 15) {
+        return yield* badRequest("This repository has too many contributors. Miyagi supports repositories with up to 15 contributors.");
       }
 
       const timestamp = nowIso();

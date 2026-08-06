@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ArrowLeft,
   ArrowRight,
@@ -84,7 +84,6 @@ export function DocumentationSidebar({ role, activeSection, mobileOpen, onBack, 
 
   function openSection(id: string) {
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    window.history.replaceState(null, '', `#${id}`)
     onSectionChange(id)
     onClose()
   }
@@ -130,11 +129,13 @@ export function DocumentationSidebar({ role, activeSection, mobileOpen, onBack, 
 
 type DocsProps = {
   role: Role
+  activeSection: string
   onSectionChange: (id: string) => void
 }
 
-export function HelpDocs({ role, onSectionChange }: DocsProps) {
+export function HelpDocs({ role, activeSection, onSectionChange }: DocsProps) {
   const isProfessor = role === 'professor'
+  const initialSection = useRef(activeSection)
   const [enquiry, setEnquiry] = useState('')
 
   function sendEnquiry(event: React.FormEvent) {
@@ -145,6 +146,11 @@ export function HelpDocs({ role, onSectionChange }: DocsProps) {
     const body = encodeURIComponent(message)
     window.location.href = `mailto:support@miyagi.app?subject=${subject}&body=${body}`
   }
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => document.getElementById(initialSection.current)?.scrollIntoView({ block: 'start' }))
+    return () => window.cancelAnimationFrame(frame)
+  }, [])
 
   useEffect(() => {
     const sections = navigationForRole(role).flatMap((group) => group.sections)

@@ -1,21 +1,38 @@
 # Miyagi
 
-Miyagi aids professors organize courses and assignments, connect public student GitHub repositories, and review contribution activity.
+Miyagi helps professors organize courses and assignments, connect public student GitHub repositories, and review contribution activity.
 
-## Local development
+## Deploy on a DigitalOcean Droplet
 
-Install the frontend and backend dependencies:
+You only need the Droplet’s public IP and GitHub OAuth credentials. Put those three values in `.env`, then Docker Compose runs the complete app:
 
 ```sh
-npm install
-cd back && bun install
+git clone https://github.com/koushik255/miyagi.git
+cd miyagi
+cp .env.example .env
+nano .env
+docker compose up -d --build
 ```
 
-Copy `back/.env.example` to `back/.env`, add a GitHub OAuth App's credentials, and use this callback URL for local development:
+No domain is required. Caddy is already included and serves Miyagi at `http://YOUR_DROPLET_IP`. The [step-by-step deployment guide](DEPLOYMENT.md) gives the exact GitHub OAuth values to use.
+
+## Run locally
+
+You need Node.js, npm, Bun, and a GitHub OAuth App. Set the OAuth callback URL to:
 
 ```text
 http://localhost:3000/auth/github/callback
 ```
+
+Then install the app:
+
+```sh
+npm ci
+cp back/.env.example back/.env
+(cd back && bun install --frozen-lockfile)
+```
+
+Open `back/.env` and replace the two GitHub credential placeholders.
 
 Run the backend and frontend in separate terminals:
 
@@ -37,7 +54,3 @@ npm run build
 npm run lint
 cd back && bun test
 ```
-
-## Self-hosting
-
-See [DEPLOYMENT.md](DEPLOYMENT.md) for the production setup. A deployment needs a server, a public HTTPS domain, and its own GitHub OAuth App.

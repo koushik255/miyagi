@@ -20,6 +20,7 @@ type GitHubCommitListItem = {
 };
 
 type GitHubRepositoryItem = { full_name: string; private: boolean; html_url: string };
+type GitHubContributorItem = { login?: string; type?: string; name?: string; email?: string };
 type GitHubMirrorConfig = {
   mirrorId: string;
   githubRepoUrl: string;
@@ -50,7 +51,7 @@ function defaultDataRoot() {
   return join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "miyagi");
 }
 
-function githubFetch<T>(path: string, accessToken?: string | null) {
+function githubFetch<T>(path: string, accessToken?: string | null, noContentValue?: T) {
   const headers: Record<string, string> = {
     Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
@@ -59,7 +60,9 @@ function githubFetch<T>(path: string, accessToken?: string | null) {
   if (token) headers.Authorization = `Bearer ${token}`;
   return tryPromise((signal) => fetch(`https://api.github.com${path}`, { headers, signal }), "Could not reach GitHub").pipe(
     Effect.flatMap((response) => response.ok
-      ? tryPromise(() => response.json() as Promise<T>, "GitHub returned invalid JSON")
+      ? response.status === 204 && noContentValue !== undefined
+        ? Effect.succeed(noContentValue)
+        : tryPromise(() => response.json() as Promise<T>, "GitHub returned invalid JSON")
       : tryPromise(() => response.text(), "Could not read the GitHub error response").pipe(
         Effect.flatMap((body) => Effect.fail(appError(502, `GitHub API failed: ${response.status} ${body}`))),
       )),
@@ -70,6 +73,15 @@ export function getGithubRepository(owner: string, repo: string, accessToken?: s
   return githubFetch<GitHubRepositoryItem>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, accessToken).pipe(
     Effect.map((result) => ({ fullName: result.full_name, htmlUrl: result.html_url, private: result.private })),
   );
+}
+
+export function getGithubRepositoryContributorCount(owner: string, repo: string, accessToken?: string | null, limit = 15) {
+  const requested = limit + 1;
+  return githubFetch<GitHubContributorItem[]>(
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contributors?anon=1&per_page=${requested}`,
+    accessToken,
+    [],
+  ).pipe(Effect.map((contributors) => Math.min(contributors.length, requested)));
 }
 
 const mirrorPath = (repositoryId: string) => join(GITHUB_MIRRORS_ROOT, `${repositoryId}.git`);

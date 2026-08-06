@@ -1,0 +1,13 @@
+.git
+.env
+.env.*
+!.env.example
+back/.env
+node_modules
+back/node_modules
+dist
+*.sqlite
+*.sqlite-*
+*.log
+mpv-shot*.jpg
+

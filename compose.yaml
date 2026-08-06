@@ -1,0 +1,32 @@
+services:
+  miyagi:
+    build: .
+    restart: unless-stopped
+    environment:
+      GITHUB_OAUTH_CLIENT_ID: "${GITHUB_OAUTH_CLIENT_ID:?Set GITHUB_OAUTH_CLIENT_ID in .env}"
+      GITHUB_OAUTH_CLIENT_SECRET: "${GITHUB_OAUTH_CLIENT_SECRET:?Set GITHUB_OAUTH_CLIENT_SECRET in .env}"
+      GITHUB_OAUTH_REDIRECT_URI: "http://${DROPLET_IP:?Set DROPLET_IP in .env}/auth/github/callback"
+      MIYAGI_DATA_ROOT: /data
+    volumes:
+      - miyagi_data:/data
+    healthcheck:
+      test: ["CMD", "bun", "-e", "const response = await fetch('http://127.0.0.1:3000/api/health'); if (!response.ok) process.exit(1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      miyagi:
+        condition: service_healthy
+    environment:
+      DROPLET_IP: "${DROPLET_IP:?Set DROPLET_IP in .env}"
+    ports:
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+
+volumes:
+  miyagi_data:

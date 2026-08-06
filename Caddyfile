@@ -1,0 +1,4 @@
+http://{$DROPLET_IP} {
+	encode zstd gzip
+	reverse_proxy miyagi:3000
+}

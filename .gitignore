@@ -18,6 +18,7 @@ coverage/
 *.sqlite3-*
 *.db
 *.db-*
+back/data/
 
 .DS_Store
 .idea/

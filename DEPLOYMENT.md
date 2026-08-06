@@ -1,103 +1,114 @@
-# Self-hosting Miyagi
+# Deploy Miyagi on DigitalOcean
 
-Miyagi is a web app with a Bun backend and a Vite frontend. A production instance needs to run on a server that is reachable by the people using it; building the frontend on a laptop is not enough. The backend serves the built frontend and the API together.
+Miyagi runs on a Droplet with Docker Compose. You access it through the Droplet’s public IP address, so no domain or DNS setup is required.
 
-## What you need
+## Before you start
 
-- A Linux server (a small VPS is enough) with a public HTTPS domain.
-- Node.js/npm, Bun, and Git.
-- A GitHub account and a GitHub OAuth App created by you. Do not reuse the OAuth credentials from another Miyagi installation.
+You need:
 
-## 1. Put your copy on the server
+- A DigitalOcean Droplet with Git, [Docker Engine, and Docker Compose](https://docs.docker.com/engine/install/).
+- The Droplet’s public IPv4 address.
+- Port **80** open in the DigitalOcean firewall.
+- A GitHub account that can create an OAuth App.
 
-Fork this repository into your own GitHub account, then clone your fork on the server:
+You do **not** need to install Node.js, Bun, Caddy, Nginx, or a database. Docker provides everything the app needs, including Caddy.
+
+## 1. Create a GitHub OAuth App
+
+In GitHub, go to **Settings → Developer settings → OAuth Apps → New OAuth App**.
+
+If the Droplet IP is `203.0.113.10`, enter:
+
+```text
+Application name: Miyagi
+Homepage URL: http://203.0.113.10
+Authorization callback URL: http://203.0.113.10/auth/github/callback
+```
+
+Replace `203.0.113.10` with your Droplet’s real public IP. Create the app, then generate a client secret.
+
+Keep the GitHub **client ID** and **client secret** ready.
+
+## 2. Enter the three settings
+
+Connect to the Droplet and run:
 
 ```sh
-git clone https://github.com/YOUR_GITHUB_USERNAME/miyagi.git
+git clone https://github.com/koushik255/miyagi.git
 cd miyagi
+cp .env.example .env
+nano .env
 ```
 
-If you are using a private fork, make sure the server can authenticate to GitHub before cloning and when pulling updates.
+`.env` is the only file you configure. Enter these three values:
 
-## 2. Create your own GitHub OAuth App
+```env
+DROPLET_IP=203.0.113.10
+GITHUB_OAUTH_CLIENT_ID=your-client-id
+GITHUB_OAUTH_CLIENT_SECRET=your-client-secret
+```
 
-In GitHub, open **Settings → Developer settings → OAuth Apps → New OAuth App**. Use your production site for the homepage URL and register this callback URL:
+Use the same IP address that you entered in GitHub. Do not add `http://`, `https://`, or a path to `DROPLET_IP`.
+
+Save the file and exit the editor.
+
+## 3. Start Miyagi
+
+```sh
+docker compose up -d --build
+```
+
+That is the complete deployment. Docker builds Miyagi, starts the app and Caddy, restarts them after a reboot, and stores the database in a persistent volume.
+
+Open this address in a browser:
 
 ```text
-https://YOUR_DOMAIN/auth/github/callback
+http://YOUR_DROPLET_IP
 ```
 
-Existing installations already using `/auth/professor/github/callback` or `/auth/student/github/callback` can keep that URL; both legacy paths use the same role-aware callback handler.
-
-Save the generated client ID and client secret. Miyagi uses GitHub for sign-in; it does not use a shared Miyagi GitHub connection.
-
-## 3. Install and build
-
-Install Node/npm and Bun on the server, then run:
+## Check the deployment
 
 ```sh
-npm ci
-(cd back && bun install --frozen-lockfile)
-npm run build
+docker compose ps
+curl http://YOUR_DROPLET_IP/api/health
 ```
 
-## 4. Configure the backend
+The health endpoint should return:
 
-Copy the environment template, edit the domain and GitHub credentials, and generate a state secret. Keep `back/.env` private and do not commit it:
+```json
+{"ok":true}
+```
+
+If the site does not open, view the logs:
 
 ```sh
-cp back/.env.example back/.env
-openssl rand -hex 32
-# paste the generated value into GITHUB_OAUTH_STATE_SECRET in back/.env;
-# it signs OAuth state and HttpOnly login sessions
+docker compose logs --tail=100
 ```
 
-`MIYAGI_DATA_ROOT` is the only storage setting. Miyagi puts `app.sqlite` and its disposable bare Git cache below that directory. Create it once and let the account running Bun own it:
+Check that port 80 is open and that `.env` and the GitHub OAuth App use the same IP address.
+
+## Update Miyagi
 
 ```sh
-sudo mkdir -p /var/lib/miyagi
-sudo chown -R "$USER":"$USER" /var/lib/miyagi
-```
-
-## 5. Run the server
-
-Start the backend from the repository’s `back` directory:
-
-```sh
-cd back
-bun run src/index.ts
-```
-
-The app listens on port `3000` by default. Put it behind a reverse proxy such as Caddy or Nginx, terminate HTTPS there, and proxy requests to `127.0.0.1:3000`. Keep the backend running with a service manager such as `systemd` or Docker so it restarts after reboots.
-
-Check the instance from the server or through the proxy:
-
-```sh
-curl https://YOUR_DOMAIN/api/health
-```
-
-It should return `{"ok":true}`. Then open `https://YOUR_DOMAIN` and test both Professor and Student GitHub sign-in.
-
-## 6. Use your own GitHub repositories in Miyagi
-
-After signing in as a professor, create a course and assignment. The professor adds repositories by entering complete **public GitHub repository URLs**, for example:
-
-```text
-https://github.com/student/project-one
-```
-
-For a batch import, enter one public repository URL per line in a `.txt` file. Students only need to keep their repository public and share its URL with the professor; they do not upload or connect a repository themselves.
-
-## Updating
-
-Pull changes from your fork, rebuild the frontend, reinstall backend dependencies if the lockfile changed, and restart the backend service:
-
-```sh
+cd miyagi
 git pull
-npm ci
-npm run build
-(cd back && bun install --frozen-lockfile)
-# restart your systemd/Docker service here
+docker compose up -d --build
 ```
 
-Back up `/var/lib/miyagi/app.sqlite` before upgrading or moving the instance. The `github_mirrors` directory is only a cache and can be regenerated from GitHub.
+Docker keeps the existing `.env` file and database.
+
+## Back up the database
+
+Stop the app briefly, copy the database, and start it again:
+
+```sh
+docker compose stop miyagi
+docker compose cp miyagi:/data/app.sqlite ./miyagi-backup.sqlite
+docker compose start miyagi
+```
+
+Keep `miyagi-backup.sqlite` somewhere outside the Droplet.
+
+## About HTTP
+
+This setup intentionally uses HTTP so it works directly with a Droplet IP and requires no domain. Traffic is not encrypted. Use a domain with HTTPS before using Miyagi for sensitive or public production data.

@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, BookOpen, CalendarClock, Check, ChevronDown, ChevronRight, CircleHelp, Eye, GitBranch, GraduationCap, Home, LogOut, Menu, Plus, Search, Settings, Trash2, Trophy, Upload, Users, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { BookOpen, CalendarClock, Check, ChevronDown, ChevronRight, CircleHelp, Eye, GitBranch, GraduationCap, Home, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Plus, Search, Settings, Trash2, Trophy, Upload, Users, X } from 'lucide-react'
 import { toast } from 'sonner'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../../api'
 import { initials } from '../../format'
 import type { Assignment, AssignmentActivityDashboard, Course, CourseMembershipSuggestion, Member, ProfessorGithubConnection, Repository, RepositoryActivityDashboard, Session } from '../../types'
@@ -16,12 +17,18 @@ import { useAsync, type AsyncState } from '../../lib/useAsync'
 
 type Selection = { type: 'home' } | { type: 'help' } | { type: 'course'; course: Course } | { type: 'assignment'; course: Course; assignment: Assignment } | { type: 'repository'; course: Course; assignment: Assignment; repository: Repository }
 type CreateKind = 'course' | 'join' | 'assignment' | 'repository' | null
+const SIDEBAR_COLLAPSED_KEY = 'miyagi.sidebar-collapsed'
 
 export function Workspace({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const data = useWorkspace(session)
+  const location = useLocation()
+  const routeTo = useNavigate()
   const [selection, setSelection] = useState<Selection>({ type: 'home' })
   const [query, setQuery] = useState('')
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true' } catch { return false }
+  })
   const [create, setCreate] = useState<CreateKind>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [github, setGithub] = useState<ProfessorGithubConnection | null>(null)
@@ -43,6 +50,55 @@ export function Workspace({ session, onLogout }: { session: Session; onLogout: (
     if (session.role !== 'student') return
     api<CourseMembershipSuggestion[]>(`/users/${session.user.id}/course-suggestions`).then(setCourseSuggestions).catch(() => undefined)
   }, [session])
+  useEffect(() => {
+    const parts = location.pathname.split('/').filter(Boolean).map(decodePathPart)
+    if (parts.length === 0) { setSelection({ type: 'home' }); return }
+    if (parts[0] === 'help') {
+      const section = parts[1] || 'introduction'
+      setDocsSection(section)
+      setSelection({ type: 'help' })
+      return
+    }
+    if (parts.length !== 2) { routeTo('/', { replace: true }); return }
+    if (!data.courses) return
+
+    if (parts[0] === 'course') {
+      const course = findByRouteId(data.courses, parts[1])
+      if (course) setSelection({ type: 'course', course })
+      else routeTo('/', { replace: true })
+      return
+    }
+
+    const assignmentsReady = data.courses.every((course) => data.assignments[course.id])
+    if (!assignmentsReady) return
+    const assignmentEntries = data.courses.flatMap((course) => (data.assignments[course.id] ?? []).map((assignment) => ({ course, assignment })))
+    if (parts[0] === 'assignment') {
+      const entry = findByRouteId(assignmentEntries, parts[1], ({ assignment }) => assignment.id)
+      if (entry) setSelection({ type: 'assignment', ...entry })
+      else routeTo('/', { replace: true })
+      return
+    }
+
+    if (parts[0] === 'project') {
+      if (assignmentEntries.some(({ assignment }) => !data.repositories[assignment.id])) return
+      const repositoryEntries = assignmentEntries.flatMap(({ course, assignment }) => (data.repositories[assignment.id] ?? []).map((repository) => ({ course, assignment, repository })))
+      const entry = findByRouteId(repositoryEntries, parts[1], ({ repository }) => repository.id)
+      if (entry) setSelection({ type: 'repository', ...entry })
+      else routeTo('/', { replace: true })
+      return
+    }
+
+    routeTo('/', { replace: true })
+  }, [data.assignments, data.courses, data.repositories, location.pathname, routeTo])
+  useEffect(() => {
+    if (session.role !== 'student' || selection.type !== 'assignment') return
+    const repositories = data.repositories[selection.assignment.id]
+    if (!repositories?.length) return
+    const repository = [...repositories].sort((a, b) => repositoryDisplayName(a).localeCompare(repositoryDisplayName(b)))[0]
+    const next: Selection = { type: 'repository', course: selection.course, assignment: selection.assignment, repository }
+    setSelection(next)
+    routeTo(selectionPath(next), { replace: true })
+  }, [data.repositories, routeTo, selection, session.role])
 
   async function respondToSuggestion(answer: 'accept' | 'reject') {
     if (session.role !== 'student' || !courseSuggestions[0]) return
@@ -61,13 +117,23 @@ export function Workspace({ session, onLogout }: { session: Session; onLogout: (
     return (data.courses ?? []).filter((course) => course.name.toLowerCase().includes(normalized) || (data.assignments[course.id] ?? []).some((assignment) => assignment.name.toLowerCase().includes(normalized)))
   }, [data.assignments, data.courses, query])
 
-  function navigate(next: Selection) { setSelection(next); setMobileOpen(false) }
-  const title = selection.type === 'home' ? 'Overview' : selection.type === 'help' ? 'Help & guides' : selection.type === 'course' ? selection.course.name : selection.type === 'assignment' ? selection.assignment.name : repositoryDisplayName(selection.repository)
-  const context = selection.type === 'home' ? 'Workspace' : selection.type === 'help' ? 'Miyagi docs' : selection.type === 'course' ? 'Course' : selection.type === 'assignment' ? selection.course.name : `${selection.course.name} / ${selection.assignment.name}`
-
-  return <div className="l-app">
-    {selection.type === 'help' ? <DocumentationSidebar role={viewRole} activeSection={docsSection} mobileOpen={mobileOpen} onBack={() => navigate({ type: 'home' })} onClose={() => setMobileOpen(false)} onSectionChange={setDocsSection} /> : <aside className={`l-sidebar ${mobileOpen ? 'open' : ''}`}>
-      <header><button className="l-brand" onClick={() => navigate({ type: 'home' })}><strong>miyagi</strong></button><Button className="l-mobile-close" variant="ghost" size="icon" onClick={() => setMobileOpen(false)} aria-label="Close navigation"><X /></Button></header>
+  function navigate(next: Selection) {
+    setSelection(next)
+    routeTo(selectionPath(next))
+    setMobileOpen(false)
+  }
+  function setSidebar(next: boolean) {
+    setSidebarCollapsed(next)
+    try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next)) } catch { /* Preferences can remain session-only. */ }
+  }
+  const changeDocsSection = useCallback((section: string) => {
+    setDocsSection(section)
+    routeTo(`/help/${encodeURIComponent(section)}`, { replace: true })
+  }, [routeTo])
+  const sidebarHidden = sidebarCollapsed && selection.type !== 'help'
+  return <div className={`l-app ${sidebarHidden ? 'sidebar-collapsed' : ''}`}>
+    {selection.type === 'help' ? <DocumentationSidebar role={viewRole} activeSection={docsSection} mobileOpen={mobileOpen} onBack={() => navigate({ type: 'home' })} onClose={() => setMobileOpen(false)} onSectionChange={changeDocsSection} /> : <aside className={`l-sidebar ${mobileOpen ? 'open' : ''}`}>
+      <header><button className="l-brand" onClick={() => navigate({ type: 'home' })}><strong>miyagi</strong></button><div><Button className="l-sidebar-collapse" variant="ghost" size="icon" onClick={() => setSidebar(true)} aria-label="Collapse sidebar" title="Collapse sidebar"><PanelLeftClose /></Button><Button className="l-mobile-close" variant="ghost" size="icon" onClick={() => setMobileOpen(false)} aria-label="Close navigation"><X /></Button></div></header>
       <div className="l-search"><Search /><Input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search" aria-label="Search courses and assignments" /><kbd>⌘K</kbd></div>
       <nav aria-label="Workspace navigation">
         <button className={selection.type === 'home' ? 'active' : ''} onClick={() => navigate({ type: 'home' })}><Home /><span>Overview</span></button>
@@ -83,19 +149,31 @@ export function Workspace({ session, onLogout }: { session: Session; onLogout: (
     </aside>}
     {mobileOpen && <button className="l-sidebar-scrim" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
     <main className="l-main">
-      <header className="l-topbar"><div><Button className="l-mobile-menu" variant="ghost" size="icon" onClick={() => setMobileOpen(true)} aria-label="Open navigation"><Menu /></Button><span>{context}</span><h1>{title}</h1></div><div><span className={`l-role-badge ${viewRole}`}>{viewRole === 'professor' ? <GraduationCap /> : <Users />}{studentPreview ? 'Student preview' : viewRole === 'professor' ? 'Professor' : 'Student'}</span><button className={`l-icon-link ${selection.type === 'help' ? 'active' : ''}`} onClick={() => navigate({ type: 'help' })} aria-label="Open help and guides"><CircleHelp /></button><Button variant="ghost" onClick={onLogout}><LogOut /> Sign out</Button></div></header>
+      <header className="l-topbar"><div className="l-topbar-location"><Button className="l-mobile-menu" variant="ghost" size="icon" onClick={() => setMobileOpen(true)} aria-label="Open navigation"><Menu /></Button>{sidebarHidden && <Button className="l-sidebar-expand" variant="ghost" size="icon" onClick={() => setSidebar(false)} aria-label="Expand sidebar" title="Expand sidebar"><PanelLeftOpen /></Button>}<Breadcrumbs selection={selection} onNavigate={navigate} /></div><div><span className={`l-role-badge ${viewRole}`}>{viewRole === 'professor' ? <GraduationCap /> : <Users />}{studentPreview ? 'Student preview' : viewRole === 'professor' ? 'Professor' : 'Student'}</span><button className={`l-icon-link ${selection.type === 'help' ? 'active' : ''}`} onClick={() => navigate({ type: 'help' })} aria-label="Open help and guides"><CircleHelp /></button><Button variant="ghost" onClick={onLogout}><LogOut /> Sign out</Button></div></header>
       <div className={`l-content ${selection.type === 'help' ? 'l-content-docs' : ''}`}>
         {selection.type === 'home' && <HomeDashboard role={viewRole} courses={data.courses} assignmentsByCourse={data.assignments} repositoriesByAssignment={data.repositories} githubConnected={viewRole === 'student' || github?.connected === true} onSelectCourse={(course) => navigate({ type: 'course', course })} onSelectAssignment={(course, assignment) => navigate({ type: 'assignment', course, assignment })} onOpenGuide={() => navigate({ type: 'help' })} />}
-        {selection.type === 'help' && <HelpDocs role={viewRole} onSectionChange={setDocsSection} />}
+        {selection.type === 'help' && <HelpDocs role={viewRole} activeSection={docsSection} onSectionChange={changeDocsSection} />}
         {selection.type === 'course' && <CourseView session={session} canManage={canManage} course={selection.course} assignments={data.assignments[selection.course.id]} onOpen={(assignment) => navigate({ type: 'assignment', course: selection.course, assignment })} onOpenRepository={(assignment, repository) => navigate({ type: 'repository', course: selection.course, assignment, repository })} onCreate={() => setCreate('assignment')} />}
         {selection.type === 'assignment' && <AssignmentView session={session} canManage={canManage} assignment={selection.assignment} repositories={data.repositories[selection.assignment.id]} onOpen={(repository) => navigate({ ...selection, type: 'repository', repository })} onCreate={() => setCreate('repository')} onImported={() => data.loadRepositories(selection.assignment.id, true).then(() => undefined)} />}
-        {selection.type === 'repository' && <RepositoryView session={session} canManage={canManage} repository={selection.repository} repositories={data.repositories[selection.assignment.id] ?? []} onSelectRepository={(repository) => navigate({ ...selection, repository })} onBack={() => navigate({ type: 'assignment', course: selection.course, assignment: selection.assignment })} onDeleted={async () => { await data.loadRepositories(selection.assignment.id, true); navigate({ type: 'assignment', course: selection.course, assignment: selection.assignment }) }} />}
+        {selection.type === 'repository' && <RepositoryView session={session} canManage={canManage} repository={selection.repository} repositories={data.repositories[selection.assignment.id] ?? []} onSelectRepository={(repository) => navigate({ ...selection, repository })} onDeleted={async () => { await data.loadRepositories(selection.assignment.id, true); navigate({ type: 'assignment', course: selection.course, assignment: selection.assignment }) }} />}
       </div>
     </main>
     {create && <CreateDialog kind={create} session={session} selection={selection} onClose={() => setCreate(null)} onDone={async () => { setCreate(null); if (create === 'course' || create === 'join') await data.refreshCourses(); else if (selection.type === 'course') await data.loadAssignments(selection.course.id, true); else if (selection.type === 'assignment') await data.loadRepositories(selection.assignment.id, true) }} />}
     {settingsOpen && <SettingsDialog session={session} github={github} studentPreview={studentPreview} onToggleStudentPreview={() => setStudentPreview((value) => !value)} onClose={() => setSettingsOpen(false)} onAccountDeleted={onLogout} />}
     {session.role === 'student' && courseSuggestions[0] && <Modal title="Is this your course?" description={`We found your GitHub activity in ${courseSuggestions[0].courseName}.`} onClose={() => undefined} actions={<><Button variant="secondary" disabled={suggestionBusy} onClick={() => respondToSuggestion('reject')}>Not my course</Button><Button variant="primary" disabled={suggestionBusy} onClick={() => respondToSuggestion('accept')}>{suggestionBusy ? 'Saving…' : 'Yes, join course'}</Button></>}><p className="l-confirm-copy">Commits from <strong>@{courseSuggestions[0].githubUsername}</strong> were found in a repository submitted for this course.</p></Modal>}
   </div>
+}
+
+function Breadcrumbs({ selection, onNavigate }: { selection: Selection; onNavigate: (selection: Selection) => void }) {
+  if (selection.type === 'home') return <nav className="l-breadcrumb" aria-label="Breadcrumb"><span aria-current="page">Workspace</span></nav>
+  if (selection.type === 'help') return <nav className="l-breadcrumb" aria-label="Breadcrumb"><button onClick={() => onNavigate({ type: 'home' })}>Workspace</button><ChevronRight /><span aria-current="page">Help</span></nav>
+  const course = selection.course
+  return <nav className="l-breadcrumb" aria-label="Breadcrumb">
+    <button onClick={() => onNavigate({ type: 'home' })}>Courses</button><ChevronRight />
+    {selection.type === 'course' ? <span aria-current="page">{course.name}</span> : <><button onClick={() => onNavigate({ type: 'course', course })}>{course.name}</button><ChevronRight />
+      {selection.type === 'assignment' ? <span aria-current="page">{selection.assignment.name}</span> : <><button onClick={() => onNavigate({ type: 'assignment', course, assignment: selection.assignment })}>{selection.assignment.name}</button><ChevronRight /><span aria-current="page">{repositoryDisplayName(selection.repository)}</span></>}
+    </>}
+  </nav>
 }
 
 function SettingsDialog({ session, github, studentPreview, onToggleStudentPreview, onClose, onAccountDeleted }: { session: Session; github: ProfessorGithubConnection | null; studentPreview: boolean; onToggleStudentPreview: () => void; onClose: () => void; onAccountDeleted: () => void }) {
@@ -145,7 +223,8 @@ function CourseView({ session, canManage, course, assignments, onOpen, onOpenRep
   const members = useAsyncMembers(course.id)
   const [tab, setTab] = useState<'overview' | 'calendar'>('overview')
   const [previewAssignment, setPreviewAssignment] = useState<Assignment | null>(null)
-  return <div className="l-page"><header className="l-page-head"><div><Badge variant="muted">Course</Badge><h2>{course.name}</h2><p>Assignments, deadlines, and enrollment in one place.</p></div>{canManage && tab === 'overview' && <Button variant="primary" onClick={onCreate}><Plus /> New assignment</Button>}</header><div className="l-page-tabs" role="tablist" aria-label="Course views"><button role="tab" aria-selected={tab === 'overview'} onClick={() => setTab('overview')}><BookOpen /> Overview <span>{assignments?.length ?? 0}</span></button><button role="tab" aria-selected={tab === 'calendar'} onClick={() => setTab('calendar')}><CalendarClock /> Calendar</button></div>{tab === 'calendar' ? <CourseCalendar session={session} readOnly={!canManage} course={course} assignments={assignments} /> : <div className="l-two-column" onMouseLeave={() => setPreviewAssignment(null)}><section><div className="l-section-head compact"><div><h3>Assignments</h3><p>Hover an assignment to preview its leaderboard.</p></div></div><PageState loading={!assignments} empty={assignments?.length === 0}>{assignments?.map((assignment) => <button className="l-list-row" key={assignment.id} onMouseEnter={() => setPreviewAssignment(assignment)} onFocus={() => setPreviewAssignment(assignment)} onClick={() => onOpen(assignment)}><span className="l-row-icon"><CalendarClock /></span><span><strong>{assignment.name}</strong><small>{assignment.dueDate ? `Due ${formatDate(assignment.dueDate)}` : 'No due date'}</small></span><ChevronRight /></button>)}</PageState></section><section className="l-course-side-panel">{previewAssignment ? <AssignmentLeaderboardPreview assignment={previewAssignment} canManage={canManage} onOpenRepository={(repository) => onOpenRepository(previewAssignment, repository)} /> : <><div className="l-section-head compact"><div><h3>People</h3><p>Current course members.</p></div></div><PageState loading={members.loading} error={members.error} onRetry={members.retry} empty={members.data?.length === 0}>{members.data?.slice(0, 8).map((member) => <div className="l-person" key={member.memberId}><Avatar fallback={initials(member.displayName)} /><span><strong>{member.displayName}</strong><small>{member.githubUsername ?? member.role} · Joined {relativeJoinDate(member.joinedAt)}</small></span></div>)}</PageState></>}</section></div>}</div>
+  const courseMeta = `${assignments ? countLabel(assignments.length, 'assignment') : 'Loading assignments…'} · ${members.loading ? 'Loading students…' : countLabel(members.data?.length ?? 0, 'student')}`
+  return <div className="l-page"><header className="l-page-head"><div><h2>{course.name}</h2><p>{courseMeta}</p></div>{canManage && tab === 'overview' && <Button variant="primary" onClick={onCreate}><Plus /> New assignment</Button>}</header><div className="l-page-tabs" role="tablist" aria-label="Course views"><button role="tab" aria-selected={tab === 'overview'} onClick={() => setTab('overview')}><BookOpen /> Overview</button><button role="tab" aria-selected={tab === 'calendar'} onClick={() => setTab('calendar')}><CalendarClock /> Calendar</button></div>{tab === 'calendar' ? <CourseCalendar session={session} readOnly={!canManage} course={course} assignments={assignments} /> : <div className="l-two-column" onMouseLeave={() => setPreviewAssignment(null)}><section><div className="l-section-head compact"><div><h3>Assignments</h3><p>Hover an assignment to preview its leaderboard.</p></div></div><PageState loading={!assignments} empty={assignments?.length === 0}>{assignments?.map((assignment) => <button className="l-list-row" key={assignment.id} onMouseEnter={() => setPreviewAssignment(assignment)} onFocus={() => setPreviewAssignment(assignment)} onClick={() => onOpen(assignment)}><span className="l-row-icon"><CalendarClock /></span><span><strong>{assignment.name}</strong><small>{assignment.dueDate ? `Due ${formatDate(assignment.dueDate)}` : 'No due date'}</small></span><ChevronRight /></button>)}</PageState></section><section className="l-course-side-panel">{previewAssignment ? <AssignmentLeaderboardPreview assignment={previewAssignment} canManage={canManage} onOpenRepository={(repository) => onOpenRepository(previewAssignment, repository)} /> : <><div className="l-section-head compact"><div><h3>People</h3><p>Current course members.</p></div></div><PageState loading={members.loading} error={members.error} onRetry={members.retry} empty={members.data?.length === 0}>{members.data?.slice(0, 8).map((member) => <div className="l-person" key={member.memberId}><Avatar fallback={initials(member.displayName)} /><span><strong>{member.displayName}</strong><small>{member.githubUsername ?? member.role} · Joined {relativeJoinDate(member.joinedAt)}</small></span></div>)}</PageState></>}</section></div>}</div>
 }
 
 function AssignmentLeaderboardPreview({ assignment, canManage, onOpenRepository }: { assignment: Assignment; canManage: boolean; onOpenRepository: (repository: Repository) => void }) {
@@ -160,14 +239,22 @@ function AssignmentView({ session, canManage, assignment, repositories, onOpen, 
   const dashboard = useAsync(() => api<AssignmentActivityDashboard>(`/assignments/${assignment.id}/dashboard?period=weekly`), [assignment.id])
   const professorId = session.role === 'professor' && canManage ? session.professor.id : null
   const summaries = new Map((dashboard.data?.repositories ?? []).map((item) => [item.repository.id, item]))
-  return <div className="l-page"><header className="l-page-head"><div><Badge variant="muted">Assignment</Badge><h2>{assignment.name}</h2><p>{assignment.dueDate ? `Due ${formatDate(assignment.dueDate)}` : 'No deadline set'}{assignment.description ? ` · ${assignment.description}` : ''}</p></div>{professorId && <div className="l-actions"><Button variant="primary" onClick={() => setImporting(true)}><Upload /> Import repos</Button><Button variant="secondary" onClick={onCreate}><Plus /> Add one repo</Button></div>}</header><div className="l-page-tabs" role="tablist" aria-label="Assignment views"><button role="tab" aria-selected={tab === 'repositories'} onClick={() => setTab('repositories')}><GitBranch /> Repositories <span>{repositories?.length ?? 0}</span></button><button role="tab" aria-selected={tab === 'momentum'} onClick={() => setTab('momentum')}><Trophy /> Leaderboard</button></div>{tab === 'repositories' ? <section><div className="l-section-head compact"><div><h3>Repositories</h3><p>Select a repository to inspect its activity and contributors.</p></div></div><PageState loading={!repositories} empty={repositories?.length === 0}>{repositories?.map((repository) => <RepositorySummaryRow key={repository.id} repository={repository} summary={summaries.get(repository.id)} loading={dashboard.loading} onOpen={() => onOpen(repository)} />)}</PageState></section> : <TeamMomentum state={dashboard} showNeedsAttention={canManage} onOpen={onOpen} />}{importing && professorId && <ImportRepositories assignment={assignment} onClose={() => setImporting(false)} onImported={onImported} />}</div>
+  const assignmentMeta = [assignment.dueDate ? `Due ${formatDate(assignment.dueDate)}` : 'No deadline', repositories ? countLabel(repositories.length, 'repository') : 'Loading repositories…', assignment.description].filter(Boolean).join(' · ')
+
+  return <div className="l-page">
+    <header className="l-page-head"><div><h2>{assignment.name}</h2><p>{assignmentMeta}</p></div>{professorId && <div className="l-actions"><Button variant="primary" onClick={() => setImporting(true)}><Upload /> Import repos</Button><Button variant="secondary" onClick={onCreate}><Plus /> Add one repo</Button></div>}</header>
+    {!canManage
+      ? <PageState loading={!repositories} empty={repositories?.length === 0}><div className="l-state" aria-live="polite">Opening project…</div></PageState>
+      : <><div className="l-page-tabs" role="tablist" aria-label="Assignment views"><button role="tab" aria-selected={tab === 'repositories'} onClick={() => setTab('repositories')}><GitBranch /> Repositories <span>{repositories?.length ?? 0}</span></button><button role="tab" aria-selected={tab === 'momentum'} onClick={() => setTab('momentum')}><Trophy /> Leaderboard</button></div>{tab === 'repositories' ? <section><div className="l-section-head compact"><div><h3>Repositories</h3><p>Select a repository to inspect its activity and contributors.</p></div></div><PageState loading={!repositories} empty={repositories?.length === 0}>{repositories?.map((repository) => <RepositorySummaryRow key={repository.id} repository={repository} summary={summaries.get(repository.id)} loading={dashboard.loading} onOpen={() => onOpen(repository)} />)}</PageState></section> : <TeamMomentum state={dashboard} showNeedsAttention onOpen={onOpen} />}</>}
+    {importing && professorId && <ImportRepositories assignment={assignment} onClose={() => setImporting(false)} onImported={onImported} />}
+  </div>
 }
 
-function RepositoryView({ session, canManage, repository, repositories, onSelectRepository, onBack, onDeleted }: { session: Session; canManage: boolean; repository: Repository; repositories: Repository[]; onSelectRepository: (repository: Repository) => void; onBack: () => void; onDeleted: () => Promise<void> }) {
+function RepositoryView({ session, canManage, repository, repositories, onSelectRepository, onDeleted }: { session: Session; canManage: boolean; repository: Repository; repositories: Repository[]; onSelectRepository: (repository: Repository) => void; onDeleted: () => Promise<void> }) {
   const [confirming, setConfirming] = useState(false)
   const professorId = session.role === 'professor' && canManage ? session.professor.id : undefined
   async function remove() { if (!professorId) return; await api(`/assignment-repositories/${repository.id}`, { method: 'DELETE' }); toast.success('Repository removed'); await onDeleted() }
-  return <div className="l-page"><button className="l-back" onClick={onBack}><ArrowLeft /> Back to assignment</button><header className="l-page-head"><div><Badge variant="muted"><GitBranch /> Repository</Badge><h2>{repositoryDisplayName(repository)}</h2><p>{repository.githubRepoUrl ?? 'Connected repository'}</p></div>{professorId && <div className="l-repository-actions">{repositories.length > 1 && <label className="l-repository-switcher"><span>View repository</span><Select value={repository.id} onChange={(event) => { const selected = repositories.find((candidate) => candidate.id === event.target.value); if (selected) onSelectRepository(selected) }}>{[...repositories].sort((a, b) => repositoryDisplayName(a).localeCompare(repositoryDisplayName(b))).map((candidate) => <option key={candidate.id} value={candidate.id}>{repositoryDisplayName(candidate)}</option>)}</Select></label>}<Button variant="danger" onClick={() => setConfirming(true)}>Remove</Button></div>}</header><Insights id={repository.id} />{confirming && <Modal title="Remove repository?" description="Miyagi will stop tracking this repository. The GitHub repository itself will not be deleted." onClose={() => setConfirming(false)} actions={<><Button variant="secondary" onClick={() => setConfirming(false)}>Cancel</Button><Button variant="danger" onClick={remove}>Remove repository</Button></>}><p className="l-confirm-copy">This action removes its activity history from this assignment and cannot be undone.</p></Modal>}</div>
+  return <div className="l-page"><header className="l-page-head"><div><h2>{repositoryDisplayName(repository)}</h2><p>{repository.githubRepoUrl ?? 'Connected repository'}</p></div>{(repositories.length > 1 || professorId) && <div className="l-repository-actions">{repositories.length > 1 && <label className="l-repository-switcher"><span>View project</span><Select value={repository.id} onChange={(event) => { const selected = repositories.find((candidate) => candidate.id === event.target.value); if (selected) onSelectRepository(selected) }}>{[...repositories].sort((a, b) => repositoryDisplayName(a).localeCompare(repositoryDisplayName(b))).map((candidate) => <option key={candidate.id} value={candidate.id}>{repositoryDisplayName(candidate)}</option>)}</Select></label>}{professorId && <Button variant="danger" onClick={() => setConfirming(true)}>Remove</Button>}</div>}</header><Insights id={repository.id} />{confirming && <Modal title="Remove repository?" description="Miyagi will stop tracking this repository. The GitHub repository itself will not be deleted." onClose={() => setConfirming(false)} actions={<><Button variant="secondary" onClick={() => setConfirming(false)}>Cancel</Button><Button variant="danger" onClick={remove}>Remove repository</Button></>}><p className="l-confirm-copy">This action removes its activity history from this assignment and cannot be undone.</p></Modal>}</div>
 }
 
 function RepositorySummaryRow({ repository, summary, loading, onOpen }: { repository: Repository; summary?: RepositoryActivityDashboard; loading: boolean; onOpen: () => void }) {
@@ -205,14 +292,42 @@ function useAsyncMembers(courseId: string) {
   return { ...state, retry: () => { setState((current) => ({ ...current, loading: true })); setNonce((value) => value + 1) } }
 }
 
+function selectionPath(selection: Selection) {
+  if (selection.type === 'home') return '/'
+  if (selection.type === 'help') return '/help/introduction'
+  if (selection.type === 'course') return `/course/${routeToken(selection.course.name, selection.course.id)}`
+  if (selection.type === 'assignment') return `/assignment/${routeToken(selection.assignment.name, selection.assignment.id)}`
+  return `/project/${routeToken(repositoryDisplayName(selection.repository), selection.repository.id)}`
+}
+
+function routeToken(name: string, id: string) {
+  const slug = name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || 'item'
+  return `${slug}-${id.slice(0, 8).toLowerCase()}`
+}
+
+function findByRouteId<T extends { id: string }>(items: T[], token: string): T | undefined
+function findByRouteId<T>(items: T[], token: string, idOf: (item: T) => string): T | undefined
+function findByRouteId<T>(items: T[], token: string, idOf: (item: T) => string = (item) => (item as { id: string }).id) {
+  const prefix = token.slice(-8).toLowerCase()
+  if (!/^[a-f0-9]{8}$/.test(prefix)) return undefined
+  const matches = items.filter((item) => idOf(item).toLowerCase().startsWith(prefix))
+  return matches.length === 1 ? matches[0] : undefined
+}
+
+function decodePathPart(value: string) {
+  try { return decodeURIComponent(value) } catch { return value }
+}
+
 function formatDate(value: string) { return new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) }
 
 function repositoryDisplayName(repository: Repository) {
   return repository.githubRepo || repository.name.split('/').filter(Boolean).at(-1) || repository.name
 }
 
-function contributorLabel(count: number) { return `${count} contributor${count === 1 ? '' : 's'}` }
-function commitLabel(count: number) { return `${count} commit${count === 1 ? '' : 's'}` }
+function countLabel(count: number, noun: string) { return `${count} ${noun}${count === 1 ? '' : 's'}` }
+function contributorLabel(count: number) { return countLabel(count, 'contributor') }
+function commitLabel(count: number) { return countLabel(count, 'commit') }
 function contributorNames(people: RepositoryActivityDashboard['members']) {
   if (people.length === 0) return 'No contributors yet'
   return `by ${people.map((person) => person.githubUsername ?? person.username ?? person.displayName).join(', ')}`

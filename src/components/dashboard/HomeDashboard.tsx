@@ -23,6 +23,7 @@ type AttentionItem = {
 }
 
 const relativeDate = new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
+const assignmentCountLabel = (count: number) => `${count} assignment${count === 1 ? '' : 's'}`
 
 function dueLabel(value: string, now: number) {
   const days = Math.ceil((new Date(value).getTime() - now) / 86_400_000)
@@ -81,11 +82,7 @@ export function HomeDashboard({
   return (
     <div className="home-dashboard">
       <section className="home-dashboard-heading">
-        <div>
-          <span className="page-eyebrow">Overview</span>
-          <h2>What needs attention</h2>
-          <p>Only deadlines and setup issues that may require action.</p>
-        </div>
+        <h2>Action items</h2>
         {upcoming[0] && <Badge variant="muted"><CalendarDays size={12} /> Next due {dueLabel(upcoming[0].dueDate!, now)}</Badge>}
       </section>
 
@@ -126,7 +123,7 @@ export function HomeDashboard({
           {(courses ?? []).slice(0, 4).map((course) => (
             <button key={course.id} onClick={() => onSelectCourse(course)}>
               <span><GitBranch size={14} aria-hidden="true" /><strong>{course.name}</strong></span>
-              <small>{(assignmentsByCourse[course.id] ?? []).length} assignments</small>
+              <small>{assignmentCountLabel((assignmentsByCourse[course.id] ?? []).length)}</small>
             </button>
           ))}
         </div>

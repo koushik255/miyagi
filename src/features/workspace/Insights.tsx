@@ -12,7 +12,7 @@ export function Insights({ id }: { id: string }) {
   const data = state.data
 
   return <section className="l-insights">
-    <header className="l-section-head"><div><span className="l-kicker">Repository</span><h2>Activity overview</h2><p>Contributions and recent changes for the selected period.</p></div><div className="l-actions">
+    <header className="l-section-head"><div><h2>Activity overview</h2><p>Contributions and recent changes for the selected period.</p></div><div className="l-actions">
       <div className="l-segment" aria-label="Activity period">{(['weekly', 'monthly', 'semester'] as Period[]).map((value) => <button key={value} className={period === value ? 'active' : ''} onClick={() => setPeriod(value)}>{value === 'weekly' ? 'Week' : value === 'monthly' ? 'Month' : 'Term'}</button>)}</div>
     </div></header>
     <PageState loading={state.loading} error={state.error} onRetry={state.retry}>

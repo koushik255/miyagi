@@ -1,4 +1,4 @@
-import { GitCommit, GitPullRequestArrow, Users } from 'lucide-react'
+import { Activity, GitCommit, GitPullRequestArrow, Users } from 'lucide-react'
 import { studentAvatarStyle } from '../../avatar'
 import { initials } from '../../format'
 import type { ActivityDashboard } from '../../types'
@@ -29,7 +29,7 @@ function ContributionOverview({ people }: { people: ActivityDashboard['byStudent
 
   return <section className="l-contribution-overview">
     <header><div><h3>Contribution overview</h3><p>Relative activity for the selected period.</p></div><div className="l-overview-totals"><span><strong>{totalCommits}</strong> commits</span><span><strong>{totalChanges}</strong> lines changed</span></div></header>
-    <div className="l-contribution-chart" role="img" aria-label={`Vertical chart comparing commit counts for ${people.length} contributors`}>
+    {totalCommits === 0 ? <div className="l-contribution-empty"><Activity /><span><strong>No contribution activity</strong><small>No commits were recorded in the selected period.</small></span></div> : <div className="l-contribution-chart" role="img" aria-label={`Vertical chart comparing commit counts for ${people.length} contributors`}>
       <div className="l-chart-y-label" aria-hidden="true">Commits</div>
       <div className="l-chart-columns">
       {people.map((person) => {
@@ -41,6 +41,6 @@ function ContributionOverview({ people }: { people: ActivityDashboard['byStudent
         </div>
       })}
       </div>
-    </div>
+    </div>}
   </section>
 }

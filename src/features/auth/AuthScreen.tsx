@@ -16,12 +16,12 @@ export function AuthScreen() {
     </section>
     <section className="l-auth-panel l-role-auth">
       <div className="l-role-picker">
-        <header><span className="l-kicker">Continue with GitHub</span><h2>How will you use Miyagi?</h2><p>Choose the account type you’re creating or returning to.</p></header>
+        <header><span className="l-kicker">Continue with GitHub</span><h2>Welcome to Miyagi</h2><p>Sign in to join your course and view the projects connected to your work.</p></header>
         <div className="l-role-options">
-          <article><span className="l-role-icon"><BookOpen /></span><div><h3>Professor</h3><p>Create courses, add assignments, and review public repository activity.</p></div><Button variant="primary" size="lg" onClick={() => continueWithGithub('professor')}>Continue as professor <ArrowRight /></Button></article>
-          <article><span className="l-role-icon"><GraduationCap /></span><div><h3>Student</h3><p>Join a course and see the public repositories connected to your work.</p></div><Button variant="secondary" size="lg" onClick={() => continueWithGithub('student')}>Continue as student <ArrowRight /></Button></article>
+          <article className="l-student-option"><span className="l-role-icon"><GraduationCap /></span><div><h3>Student</h3><p>Join a course and see the public repositories connected to your work.</p></div><Button variant="primary" size="lg" onClick={() => continueWithGithub('student')}>Continue as student <ArrowRight /></Button></article>
         </div>
         <p className="l-auth-note"><GitBranch /> Miyagi requests public GitHub profile access only. Private repositories are not supported.</p>
+        <div className="l-professor-access"><span>Teaching a course?</span><button onClick={() => continueWithGithub('professor')}>Continue as professor <ArrowRight /></button></div>
       </div>
       <footer><span>One GitHub account can have one Miyagi role.</span><nav><a href="/privacy.html">Privacy</a><a href="mailto:support@miyagi.app">Support</a></nav></footer>
     </section>
