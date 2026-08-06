@@ -29,10 +29,6 @@ npm run dev
 
 The frontend runs at `http://127.0.0.1:5173` and talks to the backend at `http://localhost:3000`.
 
-## Backend structure
-
-Backend operations return `Effect` values, including SQLite queries, GitHub requests, OAuth, filesystem access, and Git commands. Routes compose those operations and execute them once at the Hono response boundary, where typed `AppError` failures become HTTP responses. GitHub login establishes a signed HttpOnly session; protected routes derive identity and ownership from that cookie rather than trusting IDs supplied by the browser. The pure dashboard calculation functions remain ordinary TypeScript because they have no side effects or failure channel.
-
 ## Verify
 
 ```sh
