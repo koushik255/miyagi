@@ -17,13 +17,17 @@ Copy the public IPv4 address shown on the Droplet page. This guide uses `143.198
 
 ## 2. Configure the firewall
 
-Create or attach a DigitalOcean Cloud Firewall with these rules:
+Create or attach a DigitalOcean Cloud Firewall. DigitalOcean includes outbound
+rules for all TCP, all UDP, and all ICMP traffic by default. Leave those default
+outbound rules unchanged; you only need to configure the inbound rules below:
 
-| Direction | Type | Port | Source or destination |
+| Direction | Type | Port | Source |
 | --- | --- | ---: | --- |
 | Inbound | SSH | 22 | Your own IP address |
 | Inbound | HTTP | 80 | All IPv4 and All IPv6 |
-| Outbound | All traffic | All | All destinations |
+
+The existing outbound rules should allow all TCP, all UDP, and all ICMP traffic
+to all IPv4 and IPv6 destinations. You do not need to add another outbound rule.
 
 DigitalOcean Cloud Firewalls block incoming traffic that is not explicitly permitted. The HTTP preset opens TCP port 80. See the [DigitalOcean firewall documentation](https://docs.digitalocean.com/products/networking/firewalls/how-to/configure-rules/).
 
@@ -102,6 +106,27 @@ Replace the example IP and GitHub credentials with the real values. This is the 
 
 ## 7. Start Miyagi
 
+If the Droplet has only **512 MB of RAM**, create a 1 GB swap file before
+building the Docker images. Without swap, the frontend build may run out of
+memory and fail:
+
+```sh
+fallocate -l 1G /swapfile
+chmod 600 /swapfile
+mkswap /swapfile
+swapon /swapfile
+```
+
+Make the swap file activate automatically after a reboot:
+
+```sh
+grep -qF '/swapfile none swap sw 0 0' /etc/fstab || echo '/swapfile none swap sw 0 0' | tee -a /etc/fstab
+```
+
+This swap step is not normally necessary on the recommended 2 GB Droplet.
+
+Now build and start Miyagi:
+
 ```sh
 docker compose up -d --build
 ```
@@ -151,7 +176,7 @@ docker compose logs --tail=100
 
 Confirm that port 80 is open and that `.env` and the GitHub OAuth App use the same IP address.
 
-## 9. Update Miyagi
+## Update Miyagi later
 
 ```sh
 cd ~/miyagi
@@ -161,7 +186,7 @@ docker compose up -d --build
 
 The `.env` file and database remain unchanged.
 
-## 10. Back up the database
+## Back up the database
 
 Stop the app briefly, copy the database, and start it again:
 
