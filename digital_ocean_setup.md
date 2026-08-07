@@ -85,7 +85,7 @@ git clone https://github.com/koushik255/miyagi.git
 cd miyagi
 ```
 
-## 6. Configure the three values
+## 6. Configure the four values
 
 Copy and open the configuration file:
 
@@ -100,9 +100,13 @@ The complete `.env` file looks like this:
 DROPLET_IP=143.198.12.34
 GITHUB_OAUTH_CLIENT_ID=your-github-client-id
 GITHUB_OAUTH_CLIENT_SECRET=your-github-client-secret
+GITHUB_USERNAME=your-github-username
 ```
 
-Replace the example IP and GitHub credentials with the real values. This is the only file users configure.
+Replace the example IP, GitHub credentials, and username with the real values.
+`GITHUB_USERNAME` is the first professor and designated owner. After signing in
+at `http://YOUR_DROPLET_IP/admin`, the owner can authorize other professors by
+their GitHub usernames. This is the only file users configure.
 
 ## 7. Start Miyagi
 

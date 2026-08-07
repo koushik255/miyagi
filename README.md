@@ -14,11 +14,22 @@ Then install the app:
 
 ```sh
 npm ci
-cp back/.env.example back/.env
+cp .env.example .env
 (cd back && bun install --frozen-lockfile)
 ```
 
-Open `back/.env` and replace the two GitHub credential placeholders.
+Open the root `.env` file and replace the GitHub credential placeholders.
+Set `GITHUB_USERNAME` to the GitHub username of the professor owner. Students
+sign in at `/`; professors sign in and manage professor access at `/admin`.
+
+`DROPLET_IP` is only required when using the included Docker Compose deployment.
+If you run Miyagi directly behind a Cloudflare Tunnel, set the callback instead:
+
+```env
+GITHUB_OAUTH_REDIRECT_URI=https://YOUR_TUNNEL_HOSTNAME/auth/github/callback
+```
+
+Enter that exact HTTPS URL as the callback URL in the GitHub OAuth App as well.
 
 Run the backend and frontend in separate terminals:
 

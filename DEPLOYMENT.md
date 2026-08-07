@@ -29,7 +29,7 @@ Replace `203.0.113.10` with your Droplet’s real public IP. Create the app, the
 
 Keep the GitHub **client ID** and **client secret** ready.
 
-## 2. Enter the three settings
+## 2. Enter the four settings
 
 Connect to the Droplet and run:
 
@@ -40,15 +40,18 @@ cp .env.example .env
 nano .env
 ```
 
-`.env` is the only file you configure. Enter these three values:
+`.env` is the only file you configure. Enter these four values:
 
 ```env
 DROPLET_IP=203.0.113.10
 GITHUB_OAUTH_CLIENT_ID=your-client-id
 GITHUB_OAUTH_CLIENT_SECRET=your-client-secret
+GITHUB_USERNAME=your-github-username
 ```
 
 Use the same IP address that you entered in GitHub. Do not add `http://`, `https://`, or a path to `DROPLET_IP`.
+Set `GITHUB_USERNAME` to the GitHub username of the first professor. This account
+is the designated owner and can authorize other professor usernames at `/admin`.
 
 Save the file and exit the editor.
 
@@ -64,6 +67,12 @@ Open this address in a browser:
 
 ```text
 http://YOUR_DROPLET_IP
+```
+
+Students sign in at the main address. Professors sign in at:
+
+```text
+http://YOUR_DROPLET_IP/admin
 ```
 
 ## Check the deployment

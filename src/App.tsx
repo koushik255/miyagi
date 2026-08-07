@@ -3,6 +3,7 @@ import { Toaster, toast } from 'sonner'
 import { api } from './api'
 import type { Professor, Session, User } from './types'
 import { AuthScreen } from './features/auth/AuthScreen'
+import { AdminPage } from './features/admin/AdminPage'
 import { Workspace } from './features/workspace/Workspace'
 import './linear.css'
 
@@ -13,6 +14,7 @@ function storedSession(): Session | null {
 }
 
 export default function App() {
+  const isAdminPath = window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin/')
   const [session, setSession] = useState<Session | null>(storedSession)
   const saveSession = useCallback((next: Session | null) => {
     setSession(next)
@@ -47,9 +49,11 @@ export default function App() {
 
   return <>
     <Toaster theme="light" position="bottom-right" richColors closeButton />
-    {session ? <Workspace session={session} onLogout={() => {
+    {session && isAdminPath ? <AdminPage session={session} onLogout={() => {
       void api('/auth/logout', { method: 'POST' }).finally(() => saveSession(null))
-    }} /> : <AuthScreen />}
+    }} /> : session ? <Workspace session={session} onLogout={() => {
+      void api('/auth/logout', { method: 'POST' }).finally(() => saveSession(null))
+    }} /> : <AuthScreen admin={isAdminPath} />}
   </>
 }
 
@@ -59,6 +63,7 @@ function oauthMessage(result: string | null) {
     invalid_state: 'The GitHub request expired. Try again.', token_exchange_failed: 'GitHub rejected the authorization request.',
     profile_fetch_failed: 'Miyagi could not read your GitHub profile.', github_account_in_use: 'That GitHub account is already connected.',
     professor_account_conflict: 'That GitHub account already has a different Miyagi role.',
+    unauthorized_professor: 'This GitHub account is not authorized as a professor.',
   }
   return messages[result ?? ''] ?? 'GitHub sign-in did not complete.'
 }

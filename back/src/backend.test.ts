@@ -11,6 +11,7 @@ process.env.GITHUB_OAUTH_CLIENT_ID = "test-client";
 process.env.GITHUB_OAUTH_CLIENT_SECRET = "test-secret";
 process.env.GITHUB_OAUTH_STATE_SECRET = "test-state-secret";
 process.env.GITHUB_OAUTH_REDIRECT_URI = "http://localhost/auth/github/callback";
+process.env.GITHUB_USERNAME = "auth-professor";
 
 const [{ default: app }, { sqlite }, { parseGithubRepoUrl }, { User }, { Professor }, { signToken }] = await Promise.all([
   import("./index"),
@@ -145,8 +146,38 @@ describe("backend foundation", () => {
     const tables = (sqlite.query("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[])
       .map(({ name }) => name);
     expect(tables).toContain("assignment_repositories");
+    expect(tables).toContain("professor_access");
     expect(tables).not.toContain("groups");
     expect(tables).not.toContain("projects");
     expect(tables).not.toContain("work_items");
+  });
+
+  test("lets only the configured owner manage professor access", async () => {
+    const addResponse = await app.request("/admin/professors", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: professorCookie },
+      body: JSON.stringify({ githubUsername: "Invited-Professor" }),
+    });
+    expect(addResponse.status).toBe(200);
+    expect((await addResponse.json() as { githubUsername: string }).githubUsername).toBe("invited-professor");
+
+    const listResponse = await app.request("/admin/professors", { headers: { cookie: professorCookie } });
+    expect(listResponse.status).toBe(200);
+    const access = await listResponse.json() as Array<{ githubUsername: string; isOwner: boolean }>;
+    expect(access.find(({ githubUsername }) => githubUsername === "auth-professor")?.isOwner).toBe(true);
+    expect(access.some(({ githubUsername }) => githubUsername === "invited-professor")).toBe(true);
+
+    const otherCookie = sessionCookie({ role: "professor", userId: otherProfessorUser.id, professorId: otherProfessor.id });
+    expect((await app.request("/admin/professors", { headers: { cookie: otherCookie } })).status).toBe(403);
+  });
+
+  test("records a professor's last login when a login token becomes a session", async () => {
+    const token = signToken({ role: "professor", userId: professorUser.id, expiresAt: Date.now() + 60_000, nonce: crypto.randomUUID() });
+    const response = await app.request(`/auth/professor/github/session?token=${encodeURIComponent(token)}`);
+    expect(response.status).toBe(200);
+
+    const listResponse = await app.request("/admin/professors", { headers: { cookie: professorCookie } });
+    const access = await listResponse.json() as Array<{ githubUsername: string; lastLoginAt: string | null }>;
+    expect(access.find(({ githubUsername }) => githubUsername === "auth-professor")?.lastLoginAt).not.toBeNull();
   });
 });

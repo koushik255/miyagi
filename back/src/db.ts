@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import { sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { Effect } from "effect";
 import { appError } from "./errors";
 
@@ -37,6 +37,13 @@ export const professorGithubAccounts = sqliteTable("professor_github_accounts", 
   scope: text("scope"),
   connectedAt: text("connected_at").notNull(),
   updatedAt: text("updated_at").notNull(),
+});
+
+export const professorAccess = sqliteTable("professor_access", {
+  githubUsername: text("github_username").primaryKey(),
+  isOwner: integer("is_owner", { mode: "boolean" }).notNull().default(false),
+  addedAt: text("added_at").notNull(),
+  lastLoginAt: text("last_login_at"),
 });
 
 export const courses = sqliteTable("courses", {
@@ -123,6 +130,7 @@ const schema = {
   users,
   professors,
   professorGithubAccounts,
+  professorAccess,
   courses,
   courseMembers,
   assignments,
@@ -146,6 +154,7 @@ const CREATE_TABLE_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, device_hash TEXT NOT NULL UNIQUE, display_name TEXT NOT NULL, email TEXT UNIQUE, github_user_id TEXT UNIQUE, github_username TEXT, avatar_color TEXT, created_at TEXT NOT NULL, last_seen_at TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS professors (id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE, page_slug TEXT NOT NULL UNIQUE, page_title TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE)`,
   `CREATE TABLE IF NOT EXISTS professor_github_accounts (professor_id TEXT PRIMARY KEY, github_user_id TEXT NOT NULL UNIQUE, github_username TEXT NOT NULL, access_token TEXT NOT NULL, token_type TEXT, scope TEXT, connected_at TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY (professor_id) REFERENCES professors(id) ON DELETE CASCADE)`,
+  `CREATE TABLE IF NOT EXISTS professor_access (github_username TEXT PRIMARY KEY COLLATE NOCASE, is_owner INTEGER NOT NULL DEFAULT 0, added_at TEXT NOT NULL, last_login_at TEXT)`,
   `CREATE TABLE IF NOT EXISTS courses (id TEXT PRIMARY KEY, name TEXT NOT NULL, join_code TEXT NOT NULL UNIQUE, professor_id TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (professor_id) REFERENCES professors(id) ON DELETE CASCADE)`,
   `CREATE TABLE IF NOT EXISTS course_members (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, course_id TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'student', joined_at TEXT NOT NULL, UNIQUE (user_id, course_id), FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE, FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE)`,
   `CREATE TABLE IF NOT EXISTS assignments (id TEXT PRIMARY KEY, course_id TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', due_date TEXT, professor_id TEXT NOT NULL, repository_mode TEXT NOT NULL DEFAULT 'github', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, FOREIGN KEY (course_id) REFERENCES courses(id) ON DELETE CASCADE, FOREIGN KEY (professor_id) REFERENCES professors(id) ON DELETE CASCADE)`,
@@ -173,7 +182,7 @@ export const initDatabase = Effect.try({
   try: () => {
     const dataRoot = process.env.MIYAGI_DATA_ROOT;
     if (!process.env.DB_PATH && dataRoot) mkdirSync(dataRoot, { recursive: true });
-    const path = process.env.DB_PATH ?? (dataRoot ? join(dataRoot, "app.sqlite") : "./app.sqlite");
+    const path = process.env.DB_PATH ?? (dataRoot ? join(dataRoot, "app.sqlite") : join(import.meta.dir, "../app.sqlite"));
     sqlite = new Database(path);
     sqlite.run("PRAGMA foreign_keys = ON");
     db = connect(sqlite);
@@ -184,12 +193,27 @@ export const initDatabase = Effect.try({
         if (!columns.has(column)) sqlite.run(statement);
       }
     }
+    sqlite.run(`INSERT OR IGNORE INTO professor_access (github_username, is_owner, added_at)
+      SELECT lower(github_username), 0, ? FROM professor_github_accounts`, [nowIso()]);
+    seedProfessorOwner();
     hydrateProfessorPages();
     sqlite.run("CREATE UNIQUE INDEX IF NOT EXISTS professors_page_slug_unique ON professors(page_slug)");
     sqlite.run("CREATE UNIQUE INDEX IF NOT EXISTS users_github_user_id_unique ON users(github_user_id)");
   },
   catch: (cause) => appError(500, "Could not initialize the database", cause),
 });
+
+function seedProfessorOwner() {
+  const owner = process.env.GITHUB_USERNAME?.trim().toLowerCase();
+  if (!owner) return;
+  const timestamp = nowIso();
+  sqlite.transaction(() => {
+    sqlite.run("UPDATE professor_access SET is_owner = 0");
+    sqlite.run(`INSERT INTO professor_access (github_username, is_owner, added_at)
+      VALUES (?, 1, ?)
+      ON CONFLICT(github_username) DO UPDATE SET is_owner = 1`, [owner, timestamp]);
+  })();
+}
 
 function hydrateProfessorPages() {
   const rows = sqlite.query(`SELECT professors.id, professors.page_slug AS pageSlug, professors.page_title AS pageTitle, users.display_name AS displayName, users.device_hash AS username FROM professors INNER JOIN users ON users.id = professors.user_id`).all() as Array<{ id: string; pageSlug: string | null; pageTitle: string | null; displayName: string; username: string }>;

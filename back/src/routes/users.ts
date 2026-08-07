@@ -3,6 +3,7 @@ import type { Context, Hono } from "hono";
 import { authSecret, clearAuthSession, readToken, requireAuthSession, setAuthSession, signToken, type AuthRole } from "../auth";
 import { appError, forbidden, notFound, requestBody, runJson, runResponse, tryPromise, unauthorized } from "../errors";
 import { Professor, type GithubOAuthProfile, type Professor as ProfessorRecord } from "../professor";
+import { ProfessorAccess } from "../professor-access";
 import { User, type PublicUser } from "../user";
 
 type Role = AuthRole;
@@ -22,13 +23,15 @@ type GithubOAuthFailure =
   | "profile_fetch_failed"
   | "github_account_in_use"
   | "professor_account_conflict"
+  | "unauthorized_professor"
   | "failed";
 
 const DeleteAccountInput = Schema.Struct({ confirmGithubUsername: Schema.optional(Schema.String) });
+const AddProfessorInput = Schema.Struct({ githubUsername: Schema.String });
 const OAUTH_FAILURES = new Set<GithubOAuthFailure>([
   "denied", "missing_config", "missing_code", "missing_professor", "missing_state", "invalid_state",
   "redirect_origin_mismatch", "token_exchange_failed", "profile_fetch_failed", "github_account_in_use",
-  "professor_account_conflict", "failed",
+  "professor_account_conflict", "unauthorized_professor", "failed",
 ]);
 
 function githubOAuthConfig() {
@@ -153,6 +156,8 @@ function completeProfessorOauth(c: Context, payload: GithubOAuthState, github: {
   profile: GithubOAuthProfile;
 }, secret: string) {
   return Effect.gen(function* () {
+    const access = yield* ProfessorAccess.find(github.profile.login);
+    if (!access) return c.redirect(oauthFailure(payload.returnTo, "unauthorized_professor"));
     const token = {
       accessToken: github.token.access_token!,
       tokenType: github.token.token_type ?? null,
@@ -167,7 +172,14 @@ function completeProfessorOauth(c: Context, payload: GithubOAuthState, github: {
     const githubUserId = String(github.profile.id);
     const linkedProfessor = yield* Professor.findByGithubUserId(githubUserId);
     const linkedUser = linkedProfessor ? yield* User.findById(linkedProfessor.userId) : undefined;
-    if (linkedProfessor && linkedUser) yield* User.connectGithubAccount(linkedUser.id, github.profile);
+    if (linkedProfessor && linkedUser) {
+      yield* User.connectGithubAccount(linkedUser.id, github.profile);
+      yield* Professor.connectGithubAccount(linkedProfessor.id, github.profile, token);
+      return c.redirect(withOauthParams(payload.returnTo, {
+        github_oauth: "professor_connected",
+        github_login_token: createGithubLoginToken("professor", linkedUser.id, secret),
+      }));
+    }
     const existingUser = linkedUser ?? (yield* User.findByGithubUserId(githubUserId));
     if (existingUser && (yield* Professor.findByUserId(existingUser.id))) {
       return c.redirect(oauthFailure(payload.returnTo, "professor_account_conflict"));
@@ -249,6 +261,26 @@ export function registerUserRoutes(app: Hono) {
     return { connected: Boolean(connection), githubUsername: connection?.githubUsername ?? null, scope: connection?.scope ?? null };
   })));
 
+  app.get("/admin/professors", (c) => runJson(c, Effect.gen(function* () {
+    const session = yield* requireAuthSession(c, "professor");
+    yield* ProfessorAccess.requireOwner(session.userId);
+    return yield* ProfessorAccess.list();
+  })));
+
+  app.post("/admin/professors", (c) => runJson(c, Effect.gen(function* () {
+    const session = yield* requireAuthSession(c, "professor");
+    yield* ProfessorAccess.requireOwner(session.userId);
+    const { githubUsername } = yield* requestBody(c, AddProfessorInput);
+    return yield* ProfessorAccess.add(githubUsername);
+  })));
+
+  app.delete("/admin/professors/:githubUsername", (c) => runJson(c, Effect.gen(function* () {
+    const session = yield* requireAuthSession(c, "professor");
+    yield* ProfessorAccess.requireOwner(session.userId);
+    yield* ProfessorAccess.remove(c.req.param("githubUsername"));
+    return { ok: true } as const;
+  })));
+
   app.get("/auth/professor/github/start", (c) => runResponse(c, startGithubOauth(c, "professor")));
   app.get("/auth/student/github/start", (c) => runResponse(c, startGithubOauth(c, "student")));
   app.get("/auth/github/callback", completeGithubOauthCallback);
@@ -262,6 +294,7 @@ export function registerUserRoutes(app: Hono) {
     const professor = user ? yield* Professor.findByUserId(user.id) : undefined;
     if (!user || !professor) return yield* unauthorized("Invalid GitHub login token");
     const presentUser = yield* User.updatePresence(user.id);
+    yield* ProfessorAccess.recordLogin(presentUser.githubUsername!);
     yield* setAuthSession(c, { role: "professor", userId: user.id, professorId: professor.id });
     return { ...professor, user: User.toPublicUser(presentUser) } satisfies ProfessorSession;
   })));

@@ -1,6 +1,7 @@
 export type Role = 'professor' | 'student'
 export type User = { id: string; displayName: string; githubUsername?: string | null; avatarColor?: string | null }
 export type Professor = { id: string; userId: string; user?: User }
+export type ProfessorAccess = { githubUsername: string; isOwner: boolean; addedAt: string; lastLoginAt: string | null; displayName: string | null; professorId: string | null }
 export type ProfessorGithubConnection = { connected: boolean; githubUsername: string | null; scope?: string | null }
 export type Course = { id: string; name: string }
 export type CourseMembershipSuggestion = { id: string; courseName: string; githubUsername: string }

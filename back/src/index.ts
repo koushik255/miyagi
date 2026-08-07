@@ -1,3 +1,4 @@
+import "./env";
 import { resolve } from "node:path";
 import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
@@ -13,7 +14,9 @@ authSecret();
 Effect.runSync(initDatabase);
 
 const app = new Hono();
-const frontendDist = resolve(process.env.FRONTEND_DIST_PATH ?? "../dist");
+const frontendDist = process.env.FRONTEND_DIST_PATH
+  ? resolve(process.env.FRONTEND_DIST_PATH)
+  : resolve(import.meta.dir, "../../dist");
 const allowedOrigins = new Set([
   process.env.FRONTEND_ORIGIN,
   "http://127.0.0.1:5173",

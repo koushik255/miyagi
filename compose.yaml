@@ -6,6 +6,7 @@ services:
       GITHUB_OAUTH_CLIENT_ID: "${GITHUB_OAUTH_CLIENT_ID:?Set GITHUB_OAUTH_CLIENT_ID in .env}"
       GITHUB_OAUTH_CLIENT_SECRET: "${GITHUB_OAUTH_CLIENT_SECRET:?Set GITHUB_OAUTH_CLIENT_SECRET in .env}"
       GITHUB_OAUTH_REDIRECT_URI: "http://${DROPLET_IP:?Set DROPLET_IP in .env}/auth/github/callback"
+      GITHUB_USERNAME: "${GITHUB_USERNAME:?Set GITHUB_USERNAME in .env}"
       MIYAGI_DATA_ROOT: /data
     volumes:
       - miyagi_data:/data

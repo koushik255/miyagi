@@ -68,6 +68,30 @@ svg { width: 16px; height: 16px; stroke-width: 1.8; }
 .l-professor-access svg { width: 12px; height: 12px; }
 .l-role-auth > footer { width: min(470px,100%); }
 
+/* Professor administration */
+.l-admin-page { min-height: 100vh; padding: clamp(28px, 5vw, 64px); background: var(--bg); }
+.l-admin-header { width: min(920px, 100%); display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin: 0 auto 24px; }
+.l-admin-header h1 { margin: 8px 0 5px; font-size: 30px; letter-spacing: -.045em; }
+.l-admin-header p { margin: 0; color: var(--subtle); }
+.l-admin-header > div:last-child { display: flex; gap: 8px; }
+.l-admin-card { width: min(920px, 100%); margin: 0 auto; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.l-admin-add { display: grid; gap: 8px; padding: 20px; border-bottom: 1px solid var(--line); }
+.l-admin-add label { font-weight: 500; }
+.l-admin-add > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.l-admin-status, .l-admin-card > .l-error { margin: 20px; }
+.l-admin-list article { min-height: 70px; display: grid; grid-template-columns: 38px minmax(0, 1fr) minmax(180px, auto) 34px; align-items: center; gap: 12px; padding: 10px 20px; border-bottom: 1px solid var(--line); }
+.l-admin-list article:last-child { border-bottom: 0; }
+.l-admin-list article > div { display: grid; }
+.l-admin-list strong { font-weight: 500; }
+.l-admin-list small, .l-admin-list time, .l-admin-status { color: var(--muted); font-size: 11px; }
+.l-admin-list time { text-align: right; }
+@media (max-width: 680px) {
+  .l-admin-header { align-items: flex-start; flex-direction: column; }
+  .l-admin-list article { grid-template-columns: 38px minmax(0, 1fr) 34px; }
+  .l-admin-list time { grid-column: 2; text-align: left; }
+  .l-admin-add > div { grid-template-columns: 1fr; }
+}
+
 /* Shell */
 .l-app { min-height: 100vh; display: grid; grid-template-columns: 252px minmax(0, 1fr); }
 .l-sidebar { position: sticky; top: 0; z-index: 30; height: 100vh; display: grid; grid-template-rows: 54px auto 1fr auto 62px; border-right: 1px solid var(--line); background: var(--sidebar); }
