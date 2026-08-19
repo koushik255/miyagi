@@ -263,7 +263,7 @@ export function HelpDocs({ role, activeSection, onSectionChange }: DocsProps) {
               <h3>Why is a student missing from the activity?</h3>
               <p>Confirm the student committed with the expected GitHub account and that the correct public repository is connected.</p>
               <h3>Can I preview the student workspace?</h3>
-              <p>Yes. Open account settings and choose <strong>View as student</strong>. Exit the preview from the same place.</p>
+              <p>Yes. Open account settings and choose <strong>View as student</strong>. When you open an assignment, select a student project to preview its repository activity. Exit the preview from account settings.</p>
             </>
           ) : (
             <>
